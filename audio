@@ -1,0 +1,12 @@
+#!/usr/bin/env sh
+
+if [[ "$1" == "alter" ]]; then
+    ffmpeg -i "$2" -filter:a "volume=${4}dB" "$3"
+elif [[ "$1" == "normalize" ]]; then
+    ffmpeg -i "$2" -filter:a loudnorm "$3"
+elif [[ "$1" == "analyze" ]]; then
+    ffmpeg -i "$2" -af volumedetect -f null /dev/null
+else
+    echo "invalid input"
+    exit 1
+fi

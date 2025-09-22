@@ -1,0 +1,6 @@
+/target
+.DS_Store
+/wasm/*
+!/wasm/favicon.svg
+!/wasm/index.html
+!/wasm/restart_audio_context.js

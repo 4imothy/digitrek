@@ -1,0 +1,22 @@
+[package]
+name = "digitrek"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = "0.16.1"
+bevy_pkv = "0.13.0"
+rand = "0.9.2"
+serde = "1.0.225"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+open = "5.3.2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3.80", features = ["Window"] }
+getrandom = { version = "0.3.3", features = ["wasm_js"] }
+
+[features]
+player_immune = []
+show_local_points = []
+one_key = []

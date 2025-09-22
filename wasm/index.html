@@ -1,0 +1,35 @@
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      html, body {
+        height: 100%;
+        margin: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background-color: #808080;
+      }
+
+      canvas {
+        height: 80vh !important;
+        width: 80vw !important;
+        background-color: white;
+      }
+
+      canvas:focus {
+          outline: none;
+          border: none;
+      }
+    </style>
+    <title>digitrek</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  </head>
+  <body>
+    <script type="module">
+      import './restart_audio_context.js'
+      import init from './digitrek.js'
+      init()
+    </script>
+  </body>
+</html>
