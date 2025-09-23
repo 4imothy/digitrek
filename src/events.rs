@@ -19,10 +19,7 @@ pub fn on_toggle_pause(
                 } else if let GameScreen::Pause = **game_screen {
                     next_screen.set(GameScreen::ResumeCountdown);
                 } else {
-                    if stats.score > config.high_score {
-                        config.high_score = stats.score;
-                        let _ = pkv.set(HIGH_SCORE_KEY, &config.high_score);
-                    }
+                    stats.save_high_score(&mut config, &mut pkv);
                     time.pause();
                     next_screen.set(GameScreen::Pause);
                 }
@@ -118,10 +115,7 @@ pub fn on_event(
                 ));
             }
             GameEvent::GameEnd => {
-                if stats.score > config.high_score {
-                    let _ = pkv.set(HIGH_SCORE_KEY, &config.high_score);
-                    config.high_score = stats.score;
-                }
+                stats.save_high_score(&mut config, &mut pkv);
                 commands.spawn(Slowdown {
                     time: GAME_OVER_SLOWDOWN_REAL_TIME,
                 });

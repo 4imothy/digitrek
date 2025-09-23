@@ -327,8 +327,8 @@ fn do_action(
             next_screen.set(Screen::MainMenu);
         }
         Label::PlayAgain => {
-            vtime.set_relative_speed(1.0);
             vtime.unpause();
+            vtime.set_relative_speed(1.0);
             next_screen.set(Screen::Game);
         }
         _ => {}

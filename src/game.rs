@@ -257,6 +257,12 @@ impl Stats {
             self.score = self.score.saturating_add_signed(dif);
         }
     }
+    pub fn save_high_score(&self, config: &mut ResMut<Config>, pkv: &mut ResMut<PkvStore>) {
+        if self.score > config.high_score {
+            config.high_score = self.score;
+            let _ = pkv.set(HIGH_SCORE_KEY, &config.high_score);
+        }
+    }
 }
 
 pub fn keypress(
@@ -1169,18 +1175,21 @@ pub fn slowdown_time(
     mut slowdown: Single<&mut Slowdown>,
     rtime: Res<Time<Real>>,
     mut vtime: ResMut<Time<Virtual>>,
+    screen: Res<State<GameScreen>>,
     mut next_screen: ResMut<NextState<GameScreen>>,
 ) {
-    slowdown.time -= rtime.delta_secs();
+    if let GameScreen::Running = **screen {
+        slowdown.time -= rtime.delta_secs();
 
-    if slowdown.time <= 0.0 {
-        vtime.pause();
-        next_screen.set(GameScreen::End);
-    } else {
-        let total = GAME_OVER_SLOWDOWN_REAL_TIME;
-        let linear = 1.0 - (slowdown.time / total).clamp(0.0, 1.0);
-        let eased = linear.powf(0.4);
-        let new_speed = 1.0 - eased * 0.9;
-        vtime.set_relative_speed(new_speed);
+        if slowdown.time <= 0.0 {
+            vtime.pause();
+            next_screen.set(GameScreen::End);
+        } else {
+            let total = GAME_OVER_SLOWDOWN_REAL_TIME;
+            let linear = 1.0 - (slowdown.time / total).clamp(0.0, 1.0);
+            let eased = linear.powf(0.4);
+            let new_speed = 1.0 - eased * 0.9;
+            vtime.set_relative_speed(new_speed);
+        }
     }
 }
