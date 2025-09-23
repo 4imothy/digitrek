@@ -273,6 +273,7 @@ pub fn keypress(
     window: Single<&Window>,
     time: ResMut<Time<Virtual>>,
     stats: Single<&mut Stats>,
+    config: Res<Config>,
 ) {
     let (mut player, player_transform) = player.into_inner();
     if !stats.running {
@@ -299,7 +300,7 @@ pub fn keypress(
             }
             Key::Character(str) => {
                 if let Some(key) = str.chars().next().map(|c| c.to_ascii_lowercase()) {
-                    if !keys::DVORAK_POOL.contains(&key) {
+                    if !config.keypool().contains(&key) {
                         continue;
                     }
                     if let Some(selected) = player.selected {
