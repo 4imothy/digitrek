@@ -170,6 +170,7 @@ pub fn setup(
         friend_spawn: asset_server.load("pop.ogg"),
         friend_collect: asset_server.load("collect.ogg"),
     });
+    commands.insert_resource(MovementControls { v: None, h: None });
 }
 
 impl Shape {
@@ -428,27 +429,46 @@ fn viewport_width(win: &Window) -> f32 {
 pub fn player_movement(
     time: Res<Time>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut controls: ResMut<MovementControls>,
     mut transform: Single<&mut Transform, With<Player>>,
     window: Single<&Window>,
     config: Res<Config>,
     stats: Single<&Stats>,
 ) {
     if stats.running {
-        let mut rotation_factor = 0.;
-        let mut movement_factor = 0.;
+        let up = keyboard_input.pressed(config.up());
+        let down = keyboard_input.pressed(config.down());
+        let right = keyboard_input.pressed(config.right());
+        let left = keyboard_input.pressed(config.left());
 
-        if keyboard_input.pressed(config.right()) {
-            rotation_factor -= 1.;
+        if keyboard_input.just_pressed(config.right()) {
+            controls.h = Some(true);
+        } else if keyboard_input.just_pressed(config.left()) {
+            controls.h = Some(false);
+        } else if right ^ left {
+            controls.h = Some(right);
+        } else if !left && !right {
+            controls.h = None;
         }
-        if keyboard_input.pressed(config.left()) {
-            rotation_factor += 1.;
+
+        if keyboard_input.just_pressed(config.up()) {
+            controls.v = Some(true);
+        } else if keyboard_input.just_pressed(config.down()) {
+            controls.v = Some(false);
+        } else if up ^ down {
+            controls.v = Some(up);
+        } else if !up && !down {
+            controls.v = None;
         }
-        if keyboard_input.pressed(config.up()) {
-            movement_factor -= 1.;
-        }
-        if keyboard_input.pressed(config.down()) {
-            movement_factor += 1.;
-        }
+
+        let rotation_factor = controls
+            .h
+            .map(|v| if v { -1.0 } else { 1.0 })
+            .unwrap_or(0.0);
+        let movement_factor = controls
+            .v
+            .map(|v| if v { -1.0 } else { 1.0 })
+            .unwrap_or(0.0);
 
         let dt = time.delta_secs();
         let rotation_delta = rotation_factor * PLAYER_ROTATION_SPEED * dt;

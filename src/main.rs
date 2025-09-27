@@ -515,6 +515,12 @@ struct Player {
     selected: Option<Entity>,
 }
 
+#[derive(Resource)]
+struct MovementControls {
+    v: Option<bool>,
+    h: Option<bool>,
+}
+
 #[derive(Event)]
 enum GameEvent {
     Explosion(Vec2),
