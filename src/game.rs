@@ -313,7 +313,7 @@ pub fn keypress(
                         continue;
                     }
                     if let Some(selected) = player.selected {
-                        if let Ok((selected_entity, mut selected_enemy, selected_transform)) =
+                        if let Ok((selected_entity, mut selected_enemy, _)) =
                             enemy_query.get_mut(selected)
                         {
                             found_selected = true;
@@ -338,12 +338,6 @@ pub fn keypress(
                                         events.write(GameEvent::Invisible(*indicator));
                                         events.write(GameEvent::DeSelect(selected));
                                         player.selected = None;
-                                    } else {
-                                        launcher_point(
-                                            player_transform,
-                                            &mut launcher_transform,
-                                            &selected_transform,
-                                        );
                                     }
                                     selected_enemy.next_index += 1;
                                     events.write(GameEvent::DespawnChildren(selected_entity));
@@ -387,7 +381,7 @@ pub fn keypress(
                                 player.selected = closest_entity;
                                 events.write(GameEvent::Select(e));
                             } else {
-                                launcher_point(
+                                point_launcher(
                                     player_transform,
                                     &mut launcher_transform,
                                     &closest_enemy_transform.unwrap(),
@@ -1075,7 +1069,7 @@ pub fn track_selected_enemy(
     let mut launcher_transform = launcher.into_inner();
     let player_transform = player.into_inner();
     if let Ok(selected_transform) = selected.single() {
-        launcher_point(
+        point_launcher(
             &player_transform,
             &mut launcher_transform,
             selected_transform,
@@ -1124,7 +1118,7 @@ pub fn friend_enemy_collisions(
     }
 }
 
-fn launcher_point(
+fn point_launcher(
     player_transform: &Transform,
     launcher_transform: &mut Transform,
     target: &Transform,

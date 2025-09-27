@@ -1,5 +1,6 @@
 /target
 .DS_Store
+/ideas.md
 /wasm/*
 !/wasm/favicon.svg
 !/wasm/index.html

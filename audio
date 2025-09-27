@@ -3,7 +3,7 @@
 if [[ "$1" == "alter" ]]; then
     ffmpeg -i "$2" -filter:a "volume=${4}dB" "$3"
 elif [[ "$1" == "normalize" ]]; then
-    ffmpeg -i "$2" -filter:a loudnorm "$3"
+    ffmpeg -i "$2" -filter:a "dynaudnorm=f=150:g=5" "$3"
 elif [[ "$1" == "analyze" ]]; then
     ffmpeg -i "$2" -af volumedetect -f null /dev/null
 else
