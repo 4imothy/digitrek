@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 pub const QWERTY_POOL: [char; 16] = [
     'y', 'u', 'i', 'o', 'p', 'h', 'j', 'k', 'l', ';', '\'', 'n', 'm', ',', '.', '/',
 ];

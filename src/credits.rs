@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 pub const PROGRAMMING_LANGUAGE_TEXT: &str = "built with the rust programming language";
 pub const PROGRAMMING_LANGUAGE_LINK: &str = "https://www.rust-lang.org";
 

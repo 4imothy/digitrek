@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 use crate::*;
 use bevy::prelude::*;
 use rand::{self, Rng, rngs::ThreadRng};

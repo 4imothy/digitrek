@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 use crate::*;
 use bevy::{prelude::*, ui::RelativeCursorPosition};
 use core::f32;
