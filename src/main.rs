@@ -70,31 +70,43 @@ const SPAWNER_Z_INDEX: f32 = 2.;
 const PLAYER_Z_INDEX: f32 = 3.;
 const VIEWPORT_HEIGHT: f32 = 1000.;
 
-const BLACK: Color = Color::srgb(0., 0., 0.);
-const WHITE: Color = Color::srgb(1., 1., 1.);
-const RED: Color = Color::srgb(1., 0., 0.);
-const GREEN: Color = Color::srgb(0., 1., 0.);
-const BLUE: Color = Color::srgb(0., 0., 1.);
-const YELLOW: Color = Color::srgb(1., 1., 0.);
-const MAGENTA: Color = Color::srgb(0.5, 0., 0.5);
-const CYAN: Color = Color::srgb(0., 0.5, 0.5);
-const GREY: Color = Color::srgb(0.5, 0.5, 0.5);
+mod palette {
+    use bevy::color::Color;
+    pub const BLACK: Color = Color::srgb(0., 0., 0.);
+    pub const WHITE: Color = Color::srgb(1., 1., 1.);
+    pub const RED: Color = Color::srgb(1., 0., 0.);
+    pub const GREEN: Color = Color::srgb(0., 1., 0.);
+    pub const BLUE: Color = Color::srgb(0., 0., 1.);
+    pub const YELLOW: Color = Color::srgb(1., 1., 0.);
+    pub const MAGENTA: Color = Color::srgb(0.5, 0., 0.5);
+    pub const CYAN: Color = Color::srgb(0., 0.5, 0.5);
+    pub const GREY: Color = Color::srgb(0.5, 0.5, 0.5);
+    pub const CHARCOAL: Color = Color::srgb(0.28, 0.28, 0.28);
+}
 
-const TRIANGLE_COLOR: Color = RED;
-const RHOMBUS_COLOR: Color = BLUE;
-const PENTAGON_COLOR: Color = MAGENTA;
-const INDICATOR_COLOR: Color = YELLOW;
-const PROJECTILE_COLOR: Color = WHITE;
-const FRIEND_COLOR: Color = CYAN;
-const PLAYER_COLOR: Color = WHITE;
-const LAUNCHER_COLOR: Color = GREY;
-const TEXT_NEXT_COLOR: Color = GREEN;
-const TEXT_DONE_COLOR: Color = BLACK;
-const TEXT_FUTURE_COLOR: Color = WHITE;
-const IN_GAME_MENU_COLOR: Color = match GREY {
-    Color::Srgba(x) => Color::Srgba(Srgba { alpha: 0.7, ..x }),
-    _ => Color::srgb(0., 0., 0.),
-};
+mod colors {
+    use crate::palette;
+    use bevy::color::{Color, Srgba};
+    pub const BACKGROUND: Color = palette::BLACK;
+    pub const TRIANGLE: Color = palette::RED;
+    pub const RHOMBUS: Color = palette::BLUE;
+    pub const PENTAGON: Color = palette::MAGENTA;
+    pub const INDICATOR: Color = palette::YELLOW;
+    pub const PROJECTILE: Color = palette::WHITE;
+    pub const FRIEND: Color = palette::CYAN;
+    pub const PLAYER: Color = palette::WHITE;
+    pub const LAUNCHER: Color = palette::GREY;
+    pub const TEXT_NEXT: Color = palette::GREEN;
+    pub const TEXT_DONE: Color = palette::BLACK;
+    pub const TEXT_FUTURE: Color = palette::WHITE;
+    pub const IN_GAME_MENU: Color = match palette::CHARCOAL {
+        Color::Srgba(x) => Color::Srgba(Srgba { alpha: 0.7, ..x }),
+        _ => Color::srgb(0., 0., 0.),
+    };
+    pub const SELECTED_OUTLINE: Color = palette::WHITE;
+    pub const UNSELECTED_OUTLINE: Color = palette::GREY;
+    pub const VOLUME_BAR: Color = palette::WHITE;
+}
 
 const TRIANGLE_NUM_KEYS: usize = 1;
 const RHOMBUS_NUM_KEYS: usize = 2;
@@ -297,7 +309,7 @@ fn main() {
         .add_systems(Startup, setup)
         .init_state::<Screen>()
         .insert_resource(Config::load(&mut pkv))
-        .insert_resource(ClearColor(BLACK))
+        .insert_resource(ClearColor(colors::BACKGROUND))
         .insert_resource(pkv)
         .run();
 }
@@ -358,7 +370,7 @@ fn menu_plugin(app: &mut App) {
                 menu::volume_start_drag,
                 menu::update_volume_bar,
             )
-                .run_if(in_state(Screen::Settings)),
+                .run_if(in_state(Screen::Settings).or(in_state(GameScreen::Settings))),
         )
         .insert_resource(VolumeDrag(false));
 }
@@ -367,7 +379,10 @@ fn in_menu(state: Res<State<Screen>>, game_state: Res<State<GameScreen>>) -> boo
     matches!(
         state.get(),
         Screen::MainMenu | Screen::Credits | Screen::Settings | Screen::Help,
-    ) || matches!(game_state.get(), GameScreen::Pause | GameScreen::End)
+    ) || matches!(
+        game_state.get(),
+        GameScreen::Pause | GameScreen::End | GameScreen::Settings
+    )
 }
 
 fn game_plugin(app: &mut App) {
@@ -399,6 +414,11 @@ fn game_plugin(app: &mut App) {
         .add_systems(
             OnExit(GameScreen::Pause),
             menu::despawn_screen::<PauseScreen>,
+        )
+        .add_systems(OnEnter(GameScreen::Settings), menu::game_settings_setup)
+        .add_systems(
+            OnExit(GameScreen::Settings),
+            menu::despawn_screen::<GameSettingsScreen>,
         )
         .add_systems(OnEnter(GameScreen::End), menu::end_setup)
         .add_systems(OnExit(GameScreen::End), menu::despawn_screen::<EndScreen>)
@@ -480,6 +500,9 @@ struct HelpScreen;
 struct PauseScreen;
 
 #[derive(Component)]
+struct GameSettingsScreen;
+
+#[derive(Component)]
 struct EndScreen;
 
 #[derive(Component)]
@@ -507,6 +530,7 @@ enum GameScreen {
     Running,
     ResumeCountdown,
     Pause,
+    Settings,
     End,
 }
 

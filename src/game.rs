@@ -35,7 +35,7 @@ pub fn setup(
     commands
         .spawn((
             Mesh2d(meshes.add(CircularSector::new(PLAYER_RADIUS, PI / 6.0))),
-            MeshMaterial2d(materials.add(PLAYER_COLOR)),
+            MeshMaterial2d(materials.add(colors::PLAYER)),
             Transform {
                 translation: Vec3::new(0., PLAYER_RADIUS, PLAYER_Z_INDEX),
                 rotation: Quat::from_rotation_z(PI),
@@ -46,7 +46,7 @@ pub fn setup(
         .with_children(|cmds| {
             cmds.spawn((
                 Mesh2d(meshes.add(launcher_mesh)),
-                MeshMaterial2d(materials.add(LAUNCHER_COLOR)),
+                MeshMaterial2d(materials.add(colors::LAUNCHER)),
                 Transform {
                     rotation: Quat::from_rotation_z(PI),
                     translation: Vec3::new(0., PLAYER_RADIUS / 2., -1.),
@@ -103,7 +103,7 @@ pub fn setup(
         .spawn((
             Indicator { tracking: false },
             Mesh2d(meshes.add(indicator_mesh)),
-            MeshMaterial2d(materials.add(INDICATOR_COLOR)),
+            MeshMaterial2d(materials.add(colors::INDICATOR)),
             Transform::from_xyz(0., 0., PLAYER_Z_INDEX),
             Visibility::Hidden,
         ))
@@ -113,7 +113,7 @@ pub fn setup(
                     INDICATOR_LONG_RECTANGLE_LENGTH,
                     INDICATOR_THICKNESS,
                 ))),
-                MeshMaterial2d(materials.add(INDICATOR_COLOR)),
+                MeshMaterial2d(materials.add(colors::INDICATOR)),
                 Transform::from_xyz(-INDICATOR_RADIUS, 0., PLAYER_Z_INDEX),
             ));
             cmds.spawn((
@@ -121,7 +121,7 @@ pub fn setup(
                     INDICATOR_LONG_RECTANGLE_LENGTH,
                     INDICATOR_THICKNESS,
                 ))),
-                MeshMaterial2d(materials.add(INDICATOR_COLOR)),
+                MeshMaterial2d(materials.add(colors::INDICATOR)),
                 Transform::from_xyz(INDICATOR_RADIUS, 0., PLAYER_Z_INDEX),
             ));
             cmds.spawn((
@@ -129,7 +129,7 @@ pub fn setup(
                     INDICATOR_THICKNESS,
                     INDICATOR_LONG_RECTANGLE_LENGTH,
                 ))),
-                MeshMaterial2d(materials.add(INDICATOR_COLOR)),
+                MeshMaterial2d(materials.add(colors::INDICATOR)),
                 Transform::from_xyz(0., INDICATOR_RADIUS, PLAYER_Z_INDEX),
             ));
             cmds.spawn((
@@ -137,7 +137,7 @@ pub fn setup(
                     INDICATOR_THICKNESS,
                     INDICATOR_LONG_RECTANGLE_LENGTH,
                 ))),
-                MeshMaterial2d(materials.add(INDICATOR_COLOR)),
+                MeshMaterial2d(materials.add(colors::INDICATOR)),
                 Transform::from_xyz(0., -INDICATOR_RADIUS, PLAYER_Z_INDEX),
             ));
         });

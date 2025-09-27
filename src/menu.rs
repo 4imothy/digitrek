@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use crate::*;
-use bevy::{prelude::*, ui::RelativeCursorPosition};
+use bevy::{ecs::relationship::RelatedSpawnerCommands, prelude::*, ui::RelativeCursorPosition};
 use core::f32;
 
 const VOLUME_LABEL_PREFIX: &str = "volume:";
@@ -51,6 +51,8 @@ pub enum Label {
     HelpBack,
     Resume,
     PauseBack,
+    GameSettings,
+    GameSettingsBack,
     PlayAgain,
     EndBack,
     Quit,
@@ -147,7 +149,7 @@ pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
             cmd.spawn((
                 Text::new(format!("highscore: {}", config.high_score)),
                 FONT.clone(),
-                TextColor(TEXT_FUTURE_COLOR),
+                TextColor(colors::TEXT_FUTURE),
             ));
 
             for (action, label) in [
@@ -161,12 +163,12 @@ pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
                 let mut entity = cmd.spawn((
                     Button,
                     Node { ..button() },
-                    BorderColor(GREY),
+                    BorderColor(colors::UNSELECTED_OUTLINE),
                     BorderRadius::MAX,
                     action,
                 ));
                 entity.with_children(|parent| {
-                    parent.spawn((Text::new(label), FONT.clone(), TextColor(TEXT_NEXT_COLOR)));
+                    parent.spawn((Text::new(label), FONT.clone(), TextColor(colors::TEXT_NEXT)));
                 });
                 if let Label::Game = action {
                     entity.insert(Selected);
@@ -182,11 +184,11 @@ pub fn on_selection(
 ) {
     for entity in removed.read() {
         if let Ok(mut border) = borders.get_mut(entity) {
-            *border = BorderColor(GREY);
+            *border = BorderColor(colors::UNSELECTED_OUTLINE);
         }
     }
     if let Ok(mut new) = borders.get_mut(*selection) {
-        new.0 = WHITE;
+        new.0 = colors::SELECTED_OUTLINE;
     }
 }
 
@@ -197,12 +199,12 @@ pub fn on_active(
 ) {
     for entity in removed.read() {
         if let Ok(mut border) = borders.get_mut(entity) {
-            *border = BorderColor(GREY);
+            *border = BorderColor(colors::UNSELECTED_OUTLINE);
         }
     }
     for entity in active {
         if let Ok(mut border) = borders.get_mut(entity) {
-            *border = BorderColor(WHITE);
+            *border = BorderColor(colors::SELECTED_OUTLINE);
         }
     }
 }
@@ -224,6 +226,7 @@ pub fn mouse(
     mut app_exit_events: EventWriter<AppExit>,
     mut pause_event: EventWriter<PauseEvent>,
     mut next_screen: ResMut<NextState<Screen>>,
+    mut next_game_screen: ResMut<NextState<GameScreen>>,
     mut vtime: ResMut<Time<Virtual>>,
     mut pkv: ResMut<PkvStore>,
     mut config: ResMut<Config>,
@@ -236,6 +239,7 @@ pub fn mouse(
                 &mut app_exit_events,
                 &mut pause_event,
                 &mut next_screen,
+                &mut next_game_screen,
                 &active,
                 &keyboard_options,
                 &mut vtime,
@@ -246,9 +250,9 @@ pub fn mouse(
     }
     for (interaction, mut border_color) in hovers.iter_mut() {
         if *interaction == Interaction::Hovered {
-            border_color.0 = WHITE;
+            border_color.0 = colors::SELECTED_OUTLINE;
         } else if *interaction == Interaction::None {
-            border_color.0 = GREY;
+            border_color.0 = colors::UNSELECTED_OUTLINE;
         }
     }
 }
@@ -259,6 +263,7 @@ fn do_action(
     app_exit_events: &mut EventWriter<AppExit>,
     pause_event: &mut EventWriter<PauseEvent>,
     next_screen: &mut ResMut<NextState<Screen>>,
+    next_game_screen: &mut ResMut<NextState<GameScreen>>,
     active: &Query<(Entity, &Label), With<Active>>,
     keyboard_options: &Query<(Entity, &Label), With<KeyboardOption>>,
     vtime: &mut ResMut<Time<Virtual>>,
@@ -328,6 +333,13 @@ fn do_action(
             vtime.set_relative_speed(1.0);
             next_screen.set(Screen::MainMenu);
         }
+        Label::GameSettings => {
+            next_game_screen.set(GameScreen::Settings);
+        }
+        Label::GameSettingsBack => {
+            let _ = pkv.set(VOLUME_KEY, &config.volume);
+            next_game_screen.set(GameScreen::Pause);
+        }
         Label::PlayAgain => {
             vtime.unpause();
             vtime.set_relative_speed(1.0);
@@ -355,24 +367,28 @@ pub fn pause_setup(mut commands: Commands) {
                 ..screen_node()
             },
             BorderRadius::all(Val::Percent(5.)),
-            BackgroundColor(IN_GAME_MENU_COLOR),
+            BackgroundColor(colors::IN_GAME_MENU),
         ))
         .with_children(|cmd| {
             cmd.spawn((
-                Text::new("Game Is Paused"),
+                Text::new("game is paused"),
                 TextLayout::new_with_justify(JustifyText::Center),
                 FONT.clone(),
             ));
-            for (action, label) in [(Label::Resume, "resume"), (Label::PauseBack, "exit")] {
+            for (action, label) in [
+                (Label::Resume, "resume"),
+                (Label::GameSettings, "settings"),
+                (Label::PauseBack, "exit"),
+            ] {
                 let mut entity = cmd.spawn((
                     Button,
                     Node { ..button() },
-                    BorderColor(GREY),
+                    BorderColor(colors::UNSELECTED_OUTLINE),
                     BorderRadius::MAX,
                     action,
                 ));
                 entity.with_children(|parent| {
-                    parent.spawn((Text::new(label), FONT.clone(), TextColor(TEXT_NEXT_COLOR)));
+                    parent.spawn((Text::new(label), FONT.clone(), TextColor(colors::TEXT_NEXT)));
                 });
                 if let Label::Resume = action {
                     entity.insert(Selected);
@@ -395,7 +411,7 @@ pub fn end_setup(mut commands: Commands, stats: Single<&mut Stats>) {
                 ..screen_node()
             },
             BorderRadius::all(Val::Percent(5.)),
-            BackgroundColor(IN_GAME_MENU_COLOR),
+            BackgroundColor(colors::IN_GAME_MENU),
         ))
         .with_children(|cmd| {
             cmd.spawn((
@@ -407,12 +423,12 @@ pub fn end_setup(mut commands: Commands, stats: Single<&mut Stats>) {
                 let mut entity = cmd.spawn((
                     Button,
                     Node { ..button() },
-                    BorderColor(GREY),
+                    BorderColor(colors::UNSELECTED_OUTLINE),
                     BorderRadius::MAX,
                     action,
                 ));
                 entity.with_children(|parent| {
-                    parent.spawn((Text::new(label), FONT.clone(), TextColor(TEXT_NEXT_COLOR)));
+                    parent.spawn((Text::new(label), FONT.clone(), TextColor(colors::TEXT_NEXT)));
                 });
                 if let Label::PlayAgain = action {
                     entity.insert(Selected);
@@ -441,7 +457,7 @@ pub fn resume_countdown_setup(mut commands: Commands) {
             ),
             ..default()
         },
-        BackgroundColor(IN_GAME_MENU_COLOR),
+        BackgroundColor(colors::IN_GAME_MENU),
         BorderRadius::all(Val::Percent(100.)),
         Text::new((TIME_BEFORE_RESUME as usize).to_string()),
         FONT.clone(),
@@ -462,7 +478,7 @@ pub fn help_setup(mut commands: Commands, config: Res<Config>) {
                     config.right_char()
                 )),
                 FONT.clone(),
-                TextColor(TEXT_FUTURE_COLOR),
+                TextColor(colors::TEXT_FUTURE),
                 TextLayout {
                     justify: JustifyText::Center,
                     ..default()
@@ -472,59 +488,57 @@ pub fn help_setup(mut commands: Commands, config: Res<Config>) {
                 .spawn((
                     Label::HelpBack,
                     Button,
-                    BorderColor(GREY),
+                    BorderColor(colors::UNSELECTED_OUTLINE),
                     BorderRadius::MAX,
                     Node { ..button() },
                     Selected,
                 ))
                 .with_children(|button| {
-                    button.spawn((Text::new("back"), FONT.clone(), TextColor(TEXT_NEXT_COLOR)));
+                    button.spawn((Text::new("back"), FONT.clone(), TextColor(colors::TEXT_NEXT)));
                 });
         });
 }
 
+pub fn game_settings_setup(mut commands: Commands, config: Res<Config>) {
+    commands
+        .spawn((
+            GameSettingsScreen,
+            Node {
+                padding: UiRect {
+                    left: Val::Percent(1.),
+                    right: Val::Percent(1.),
+                    top: Val::Percent(0.),
+                    bottom: Val::Percent(0.),
+                },
+                ..screen_node()
+            },
+            BorderRadius::all(Val::Percent(5.)),
+            BackgroundColor(colors::IN_GAME_MENU.with_alpha(1.0)),
+        ))
+        .with_children(|screen| {
+            add_volume(screen, &config);
+            screen
+                .spawn((
+                    Label::GameSettingsBack,
+                    Button,
+                    BorderColor(colors::UNSELECTED_OUTLINE),
+                    BorderRadius::MAX,
+                    Node { ..button() },
+                ))
+                .with_children(|button| {
+                    button.spawn((
+                        Text::new("back"),
+                        FONT.clone(),
+                        TextColor(colors::TEXT_NEXT),
+                    ));
+                });
+        });
+}
 pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
     commands
         .spawn(screen_with(SettingsScreen))
         .with_children(|screen| {
-            screen.spawn((
-                Node {
-                    margin: UiRect::right(Val::Percent(1.)),
-                    ..default()
-                },
-                Text::new(format!("{} {}", VOLUME_LABEL_PREFIX, config.volume)),
-                FONT.clone(),
-                TextColor(TEXT_FUTURE_COLOR),
-                VolumeDisplay,
-            ));
-            screen
-                .spawn((
-                    Node {
-                        width: Val::Vw(40.),
-                        height: Val::Vh(3.0),
-                        justify_content: JustifyContent::FlexStart,
-                        align_items: AlignItems::Center,
-                        ..button()
-                    },
-                    VolumeControl,
-                    BorderColor(GREY),
-                    BorderRadius::MAX,
-                    Button,
-                    Label::Volume,
-                    RelativeCursorPosition::default(),
-                    Selected,
-                ))
-                .with_children(|volume_bar| {
-                    volume_bar.spawn((
-                        Node {
-                            width: Val::Percent(config.volume as f32),
-                            height: Val::Vh(1.),
-                            ..default()
-                        },
-                        BackgroundColor(WHITE),
-                        VolumeControlBar,
-                    ));
-                });
+            add_volume(screen, &config);
             screen.spawn((
                 Node {
                     margin: UiRect::right(Val::Percent(1.)),
@@ -532,7 +546,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                 },
                 Text::new("keyboard layout"),
                 FONT.clone(),
-                TextColor(TEXT_FUTURE_COLOR),
+                TextColor(colors::TEXT_FUTURE),
             ));
 
             let layout_groups = [
@@ -590,13 +604,13 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                             ..button()
                         },
                         BorderRadius::MAX,
-                        BorderColor(GREY),
+                        BorderColor(colors::UNSELECTED_OUTLINE),
                     ))
                     .with_children(|row| {
                         row.spawn((
                             Text::new(group_text),
                             FONT.clone(),
-                            TextColor(TEXT_FUTURE_COLOR),
+                            TextColor(colors::TEXT_FUTURE),
                         ));
 
                         for (button_label, button_text, active) in buttons {
@@ -604,7 +618,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                                 Button,
                                 button_label,
                                 Node { ..button() },
-                                BorderColor(GREY),
+                                BorderColor(colors::UNSELECTED_OUTLINE),
                                 BorderRadius::MAX,
                                 KeyboardOption,
                             ));
@@ -615,7 +629,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                                 b.spawn((
                                     Text::new(button_text),
                                     FONT.clone(),
-                                    TextColor(TEXT_NEXT_COLOR),
+                                    TextColor(colors::TEXT_NEXT),
                                 ));
                             });
                         }
@@ -626,14 +640,58 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                 .spawn((
                     Label::SettingsBack,
                     Button,
-                    BorderColor(GREY),
+                    BorderColor(colors::UNSELECTED_OUTLINE),
                     BorderRadius::MAX,
                     Node { ..button() },
                 ))
                 .with_children(|button| {
-                    button.spawn((Text::new("back"), FONT.clone(), TextColor(TEXT_NEXT_COLOR)));
+                    button.spawn((
+                        Text::new("back"),
+                        FONT.clone(),
+                        TextColor(colors::TEXT_NEXT),
+                    ));
                 });
         });
+}
+
+fn add_volume(par: &mut RelatedSpawnerCommands<ChildOf>, config: &Config) {
+    par.spawn((
+        Node {
+            margin: UiRect::right(Val::Percent(1.)),
+            ..default()
+        },
+        Text::new(format!("{} {}", VOLUME_LABEL_PREFIX, config.volume)),
+        FONT.clone(),
+        TextColor(colors::TEXT_FUTURE),
+        VolumeDisplay,
+    ));
+    par.spawn((
+        Node {
+            width: Val::Vw(40.),
+            height: Val::Vh(3.0),
+            justify_content: JustifyContent::FlexStart,
+            align_items: AlignItems::Center,
+            ..button()
+        },
+        VolumeControl,
+        BorderColor(colors::UNSELECTED_OUTLINE),
+        BorderRadius::MAX,
+        Button,
+        Label::Volume,
+        RelativeCursorPosition::default(),
+        Selected,
+    ))
+    .with_children(|volume_bar| {
+        volume_bar.spawn((
+            Node {
+                width: Val::Percent(config.volume as f32),
+                height: Val::Vh(1.),
+                ..default()
+            },
+            BackgroundColor(colors::VOLUME_BAR),
+            VolumeControlBar,
+        ));
+    });
 }
 
 pub fn credits_setup(mut commands: Commands) {
@@ -661,7 +719,7 @@ pub fn credits_setup(mut commands: Commands) {
                 let mut ent = screen.spawn((
                     label,
                     Button,
-                    BorderColor(GREY),
+                    BorderColor(colors::UNSELECTED_OUTLINE),
                     BorderRadius::MAX,
                     Node { ..button() },
                 ));
@@ -669,19 +727,23 @@ pub fn credits_setup(mut commands: Commands) {
                     ent.insert(Selected);
                 }
                 ent.with_children(|button| {
-                    button.spawn((Text::new(text), FONT.clone(), TextColor(TEXT_NEXT_COLOR)));
+                    button.spawn((Text::new(text), FONT.clone(), TextColor(colors::TEXT_NEXT)));
                 });
             }
             screen
                 .spawn((
                     Label::CreditsBack,
                     Button,
-                    BorderColor(GREY),
+                    BorderColor(colors::UNSELECTED_OUTLINE),
                     BorderRadius::MAX,
                     Node { ..button() },
                 ))
                 .with_children(|button| {
-                    button.spawn((Text::new("back"), FONT.clone(), TextColor(TEXT_NEXT_COLOR)));
+                    button.spawn((
+                        Text::new("back"),
+                        FONT.clone(),
+                        TextColor(colors::TEXT_NEXT),
+                    ));
                 });
         });
 }
@@ -756,6 +818,7 @@ pub fn keypress(
     screen: Res<State<Screen>>,
     mut vtime: ResMut<Time<Virtual>>,
     mut next_screen: ResMut<NextState<Screen>>,
+    mut next_game_screen: ResMut<NextState<GameScreen>>,
     mut pkv: ResMut<PkvStore>,
 ) {
     let (selected_ent, selected_label) = *selected;
@@ -843,7 +906,13 @@ pub fn keypress(
         (Label::Credits, -1) => Some(Label::Settings),
         #[cfg(not(target_arch = "wasm32"))]
         (Label::Quit, -1) => Some(Label::Credits),
-        (Label::Volume, 1) => Some(Label::LogicalKeyboardLayout),
+        (Label::Volume, 1) => {
+            if let Screen::Game = **screen {
+                Some(Label::GameSettingsBack)
+            } else {
+                Some(Label::LogicalKeyboardLayout)
+            }
+        }
         (Label::LogicalKeyboardLayout, 1) => Some(Label::PhysicalKeyboardLayout),
         (Label::PhysicalKeyboardLayout, 1) => Some(Label::SettingsBack),
         (Label::SettingsBack, -1) => Some(Label::PhysicalKeyboardLayout),
@@ -863,10 +932,13 @@ pub fn keypress(
         (Label::CollectFriendSound, -1) => Some(Label::FriendSpawnSound),
         (Label::CollectFriendSound, 1) => Some(Label::CreditsBack),
         (Label::CreditsBack, -1) => Some(Label::CollectFriendSound),
-        (Label::Resume, 1) => Some(Label::PauseBack),
-        (Label::PauseBack, -1) => Some(Label::Resume),
+        (Label::Resume, 1) => Some(Label::GameSettings),
+        (Label::GameSettings, 1) => Some(Label::PauseBack),
+        (Label::GameSettings, -1) => Some(Label::Resume),
+        (Label::PauseBack, -1) => Some(Label::GameSettings),
         (Label::PlayAgain, 1) => Some(Label::EndBack),
         (Label::EndBack, -1) => Some(Label::PlayAgain),
+        (Label::GameSettingsBack, -1) => Some(Label::Volume),
         _ => None,
     };
     if let Some(a) = next_selection {
@@ -887,6 +959,7 @@ pub fn keypress(
             &mut app_exit_events,
             &mut pause_event,
             &mut next_screen,
+            &mut next_game_screen,
             &active,
             &keyboard_options,
             &mut vtime,

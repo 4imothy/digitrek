@@ -89,10 +89,10 @@ pub fn on_event(
                         lifetime: 0.,
                     },
                     Mesh2d(meshes.add(Circle::new(FRIEND_RADIUS))),
-                    MeshMaterial2d(materials.add(FRIEND_COLOR)),
+                    MeshMaterial2d(materials.add(colors::FRIEND)),
                     Transform::from_translation(pos.extend(FRIEND_Z_INDEX)),
                     Text2d::new(FRIEND_START_VALUE.to_string()),
-                    TextColor(BLACK),
+                    TextColor(colors::TEXT_DONE),
                     FONT.clone(),
                 ));
             }
@@ -111,7 +111,7 @@ pub fn on_event(
             GameEvent::Projectile(entity, origin) => {
                 commands.spawn((
                     Mesh2d(meshes.add(Circle::new(PROJECTILE_RADIUS))),
-                    MeshMaterial2d(materials.add(PROJECTILE_COLOR)),
+                    MeshMaterial2d(materials.add(colors::PROJECTILE)),
                     Transform::from_translation(*origin),
                     Projectile { target: *entity },
                 ));
@@ -174,9 +174,9 @@ fn add_text(commands: &mut EntityCommands, keys: &str, next_index: usize) {
                 TextLayout::default(),
                 FONT.clone(),
                 TextColor(if next_index == 0 {
-                    TEXT_NEXT_COLOR
+                    colors::TEXT_NEXT
                 } else {
-                    TEXT_DONE_COLOR
+                    colors::TEXT_DONE
                 }),
                 EnemyText,
             ))
@@ -185,11 +185,11 @@ fn add_text(commands: &mut EntityCommands, keys: &str, next_index: usize) {
                     commands.spawn((
                         TextSpan::new(c),
                         TextColor(if next_index == i + 1 {
-                            TEXT_NEXT_COLOR
+                            colors::TEXT_NEXT
                         } else if next_index > i + 1 {
-                            TEXT_DONE_COLOR
+                            colors::TEXT_DONE
                         } else {
-                            TEXT_FUTURE_COLOR
+                            colors::TEXT_FUTURE
                         }),
                         FONT.clone(),
                     ));
@@ -209,9 +209,9 @@ fn spawn_enemy(
     config: &Config,
 ) {
     let (mesh, color, num_keys) = match shape {
-        Shape::Triangle => (meshes.add(TRIANGLE), TRIANGLE_COLOR, TRIANGLE_NUM_KEYS),
-        Shape::Rhombus => (meshes.add(RHOMBUS), RHOMBUS_COLOR, RHOMBUS_NUM_KEYS),
-        Shape::Pentagon => (meshes.add(PENTAGON), PENTAGON_COLOR, PENTAGON_NUM_KEYS),
+        Shape::Triangle => (meshes.add(TRIANGLE), colors::TRIANGLE, TRIANGLE_NUM_KEYS),
+        Shape::Rhombus => (meshes.add(RHOMBUS), colors::RHOMBUS, RHOMBUS_NUM_KEYS),
+        Shape::Pentagon => (meshes.add(PENTAGON), colors::PENTAGON, PENTAGON_NUM_KEYS),
     };
 
     let keys = (0..num_keys)
@@ -275,8 +275,8 @@ fn replace_shape(
     shape: &Shape,
 ) {
     let (mesh, color) = match shape {
-        Shape::Triangle => (meshes.add(TRIANGLE), materials.add(TRIANGLE_COLOR)),
-        Shape::Rhombus => (meshes.add(RHOMBUS), materials.add(RHOMBUS_COLOR)),
+        Shape::Triangle => (meshes.add(TRIANGLE), materials.add(colors::TRIANGLE)),
+        Shape::Rhombus => (meshes.add(RHOMBUS), materials.add(colors::RHOMBUS)),
         Shape::Pentagon => return,
     };
     let mut ent_cmds = commands.entity(entity);
