@@ -81,18 +81,17 @@ pub fn on_event(
                     &config,
                 );
             }
-            GameEvent::SpawnFriend(pos) => {
+            GameEvent::SpawnObstacle(pos, direction) => {
                 commands.spawn((
-                    Friend {
+                    Obstacle {
+                        direction: *direction,
+                        entered_viewport: false,
+                        time_to_enter_viewport: OBSTACLE_FIELD_TIME_TO_ENTER_VIEWPORT,
                         colliding: false,
-                        value: FRIEND_START_VALUE,
-                        lifetime: 0.,
                     },
-                    Mesh2d(meshes.add(Circle::new(FRIEND_RADIUS))),
-                    MeshMaterial2d(materials.add(colors::FRIEND)),
-                    Transform::from_translation(pos.extend(FRIEND_Z_INDEX)),
-                    Text2d::new(FRIEND_START_VALUE.to_string()),
-                    TextColor(colors::TEXT_DONE),
+                    Mesh2d(meshes.add(Circle::new(OBSTACLE_RADIUS))),
+                    MeshMaterial2d(materials.add(colors::OBSTACLE)),
+                    Transform::from_translation(pos.extend(OBSTACLE_Z_INDEX)),
                     FONT.clone(),
                 ));
             }

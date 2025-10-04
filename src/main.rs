@@ -30,19 +30,24 @@ const RHOMBUS_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 8.;
 const PENTAGON_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 6.;
 const PENTAGON_ROTATION_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 6.;
 const PROJECTILE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED * 4.;
+const OBSTACLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 3.;
+const OBSTACLE_FIELD_TIME_TO_ENTER_VIEWPORT: f32 = 5.;
 
 const INITIAL_ENEMY_SPAWN_DELAY: f32 = 0.;
-const INITIAL_ENEMY_SPAWN_DELAY_LOWER: f32 = 1.;
-const INITIAL_ENEMY_SPAWN_DELAY_UPPER: f32 = 5.;
+const INITIAL_ENEMY_SPAWN_DELAY_LOWER: f32 = 1.0;
+const INITIAL_ENEMY_SPAWN_DELAY_UPPER: f32 = 5.0;
 const SPAWN_ENEMY_DELAY_MIN_LOWER: f32 = 0.5;
 const SPAWN_ENEMY_DELAY_MIN_UPPER: f32 = 2.;
-const FRIEND_SPAWN_DELAY_LOWER: f32 = 3.;
-const FRIEND_SPAWN_DELAY_UPPER: f32 = 5.;
+const INITIAL_OBSTACLE_SPAWN_DELAY: f32 = 0.5;
+const INITIAL_OBSTACLE_SPAWN_DELAY_LOWER: f32 = 5.0;
+const INITIAL_OBSTACLE_SPAWN_DELAY_UPPER: f32 = 10.0;
+const SPAWN_OBSTACLE_DELAY_MIN_LOWER: f32 = 4.0;
+const SPAWN_OBSTACLE_DELAY_MIN_UPPER: f32 = 5.;
 const SPAWNER_ENEMY_SPAWN_DELAY: f32 = 4.;
-const SPAWN_ENEMY_DELAY_DECAY_RATE: f32 = 0.95;
+const SPAWN_DELAY_DECAY_RATE: f32 = 0.95;
 
 const PLAYER_RADIUS: f32 = 50.;
-const FRIEND_RADIUS: f32 = PLAYER_RADIUS / 1.5;
+const OBSTACLE_RADIUS: f32 = PLAYER_RADIUS / 1.5;
 const PROJECTILE_RADIUS: f32 = PLAYER_RADIUS / 10.;
 const EXPLOSION_PARTICLE_RADIUS_LOWER: f32 = PLAYER_RADIUS / 10.;
 const EXPLOSION_PARTICLE_RADIUS_UPPER: f32 = PLAYER_RADIUS / 5.;
@@ -63,7 +68,7 @@ static FONT: LazyLock<TextFont> = LazyLock::new(|| TextFont {
 const SCORE_TEXT_PADDING: f32 = 10.;
 
 const TRACKING_Z_INDEX: f32 = 1.;
-const FRIEND_Z_INDEX: f32 = 0.;
+const OBSTACLE_Z_INDEX: f32 = 0.;
 const PARTICLE_Z_INDEX: f32 = 0.;
 const EXPLOSION_Z_INDEX_RANGE: f32 = 0.1;
 const SPAWNER_Z_INDEX: f32 = 2.;
@@ -93,7 +98,7 @@ mod colors {
     pub const PENTAGON: Color = palette::MAGENTA;
     pub const INDICATOR: Color = palette::YELLOW;
     pub const PROJECTILE: Color = palette::WHITE;
-    pub const FRIEND: Color = palette::CYAN;
+    pub const OBSTACLE: Color = palette::CYAN;
     pub const PLAYER: Color = palette::WHITE;
     pub const LAUNCHER: Color = palette::GREY;
     pub const TEXT_NEXT: Color = palette::GREEN;
@@ -111,8 +116,6 @@ mod colors {
 const TRIANGLE_NUM_KEYS: usize = 1;
 const RHOMBUS_NUM_KEYS: usize = 2;
 const PENTAGON_NUM_KEYS: usize = 3;
-const FRIEND_START_VALUE: usize = 9;
-const FRIEND_POINT_DEDUCTION: usize = 10;
 const SPAWNER_CHILD_COLLISION_PADDING: f32 = PLAYER_RADIUS / 2.;
 
 const BOUNCE_DECAY: f32 = 5.;
@@ -167,8 +170,7 @@ const PLAYER_LOCAL_TRIANGLE: [Vec3; 3] = [
     Vec3::new(-PLAYER_RADIUS / 2., PLAYER_RADIUS, 0.),
 ];
 
-const FRIEND_SPAWN_LOCATION_MULTIPLIER: f32 = 0.7;
-const ENEMY_SPAWN_LOCATION_MULTIPLIER: f32 = 1.5;
+const SPAWN_LOCATION_MULTIPLIER: f32 = 1.5;
 
 const EXPLOSION_PARTICLE_MAX_LIFETIME: f32 = 1.;
 const EXPLOSION_PARTICLE_INITIAL_ALPHA: f32 = 0.7;
@@ -390,7 +392,7 @@ fn game_plugin(app: &mut App) {
         game::default_state,
         game::despawn::<Player>,
         game::despawn::<Enemy>,
-        game::despawn::<Friend>,
+        game::despawn::<Obstacle>,
         game::despawn::<ExplosionParticle>,
         game::despawn::<Projectile>,
         game::despawn::<Indicator>,
@@ -434,13 +436,12 @@ fn game_plugin(app: &mut App) {
             FixedUpdate,
             (
                 game::enemy_collisions,
-                game::spawner_collisions,
+                game::update_spawned_relations,
                 game::player_collisions,
-                game::friend_enemy_collisions,
+                game::obstacle_collisions,
                 game::spawn_enemies,
-                game::spawn_friends,
+                game::spawn_obstacles,
                 game::track_selected_enemy,
-                game::update_friends,
             )
                 .run_if(in_state(Screen::Game)),
         )
@@ -453,6 +454,7 @@ fn game_plugin(app: &mut App) {
                 game::projectile_movement,
                 game::tracking_enemy,
                 game::spawning_enemy,
+                game::obstacle,
                 game::explosion_system,
             )
                 .run_if(in_state(Screen::Game)),
@@ -553,7 +555,7 @@ enum GameEvent {
     ReplaceShape(Entity, Shape),
     AddText(Entity),
     SpawnEnemy(Shape, Vec2, Option<Entity>),
-    SpawnFriend(Vec2),
+    SpawnObstacle(Vec2, Vec2),
     Invisible(Entity),
     Visible(Entity),
     Select(Entity),
@@ -571,10 +573,12 @@ enum PauseEvent {
 struct Spawner {
     enemy_dist: WeightedIndex<f32>,
     enemy_delay: f32,
-    friend_delay: f32,
-    enemy_spawns_since: [usize; 3],
-    delay_lower: f32,
-    delay_upper: f32,
+    enemy_delay_lower: f32,
+    enemy_delay_upper: f32,
+    enemy_spawns_since: [usize; NUM_SHAPES],
+    obstacle_delay: f32,
+    obstacle_delay_lower: f32,
+    obstacle_delay_upper: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -586,6 +590,7 @@ enum Shape {
 
 #[derive(Component)]
 struct Tracking;
+
 #[derive(Component)]
 struct Spawning {
     time: f32,
@@ -626,9 +631,10 @@ struct Slowdown {
 }
 
 #[derive(Component)]
-struct Friend {
-    lifetime: f32,
-    value: usize,
+struct Obstacle {
+    direction: Vec2,
+    time_to_enter_viewport: f32,
+    entered_viewport: bool,
     colliding: bool,
 }
 
@@ -637,8 +643,6 @@ struct AudioAssets {
     pub projectile_launch: Handle<AudioSource>,
     pub unmatched_keypress: Handle<AudioSource>,
     pub explosion: Handle<AudioSource>,
-    pub friend_spawn: Handle<AudioSource>,
-    pub friend_collect: Handle<AudioSource>,
 }
 
 #[derive(Event)]
@@ -646,8 +650,6 @@ pub enum AudioEvent {
     ProjectileLaunch,
     Explosion,
     UnmatchedKeypress,
-    SpawnFriend,
-    CollectFriend,
 }
 
 impl AudioEvent {
@@ -656,8 +658,6 @@ impl AudioEvent {
             AudioEvent::ProjectileLaunch => sounds.projectile_launch.clone(),
             AudioEvent::Explosion => sounds.explosion.clone(),
             AudioEvent::UnmatchedKeypress => sounds.unmatched_keypress.clone(),
-            AudioEvent::SpawnFriend => sounds.friend_spawn.clone(),
-            AudioEvent::CollectFriend => sounds.friend_collect.clone(),
         }
     }
 }

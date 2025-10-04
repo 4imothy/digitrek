@@ -158,17 +158,17 @@ pub fn setup(
     commands.insert_resource(Spawner {
         enemy_dist: WeightedIndex::new(ENEMY_SPAWN_WEIGHTS).unwrap(),
         enemy_delay: INITIAL_ENEMY_SPAWN_DELAY,
-        friend_delay: FRIEND_SPAWN_DELAY_LOWER,
+        obstacle_delay: INITIAL_OBSTACLE_SPAWN_DELAY,
         enemy_spawns_since: [0, 0, 0],
-        delay_lower: INITIAL_ENEMY_SPAWN_DELAY_LOWER,
-        delay_upper: INITIAL_ENEMY_SPAWN_DELAY_UPPER,
+        enemy_delay_lower: INITIAL_ENEMY_SPAWN_DELAY_LOWER,
+        enemy_delay_upper: INITIAL_ENEMY_SPAWN_DELAY_UPPER,
+        obstacle_delay_lower: INITIAL_OBSTACLE_SPAWN_DELAY_LOWER,
+        obstacle_delay_upper: INITIAL_OBSTACLE_SPAWN_DELAY_UPPER,
     });
     commands.insert_resource(AudioAssets {
         projectile_launch: asset_server.load("projectile_launch.ogg"),
         unmatched_keypress: asset_server.load("unmatched_keypress.ogg"),
         explosion: asset_server.load("explosion.ogg"),
-        friend_spawn: asset_server.load("pop.ogg"),
-        friend_collect: asset_server.load("collect.ogg"),
     });
     commands.insert_resource(MovementControls { v: None, h: None });
 }
@@ -191,6 +191,18 @@ impl Shape {
     }
 }
 
+fn explosion_in_viewport(
+    pos: &Vec3,
+    viewport_width: f32,
+    events: &mut EventWriter<GameEvent>,
+    audio: &mut EventWriter<AudioEvent>,
+) {
+    if in_viewport(&pos, viewport_width, Vec2::ZERO) {
+        events.write(GameEvent::Explosion(pos.xy()));
+        audio.write(AudioEvent::Explosion);
+    }
+}
+
 impl Enemy {
     pub fn add_collision(&mut self, collision_normal: Vec2) {
         self.bounce_velocity = Some(collision_normal * self.mov_speed());
@@ -204,14 +216,14 @@ impl Enemy {
         entity: Entity,
         pos: &Vec3,
         normal: Vec2,
+        viewport_width: f32,
     ) {
         self.colliding = true;
         if let Some(shape) = self.shape.downgraded_shape() {
             self.shape = shape;
             self.keys = remove_last(&self.keys);
             if self.keys.is_empty() {
-                events.write(GameEvent::Explosion(pos.xy()));
-                audio.write(AudioEvent::Explosion);
+                explosion_in_viewport(pos, viewport_width, events, audio);
                 events.write(GameEvent::Despawn(entity));
             } else {
                 self.add_collision(normal);
@@ -220,8 +232,7 @@ impl Enemy {
                 events.write(GameEvent::AddText(entity));
             }
         } else {
-            events.write(GameEvent::Explosion(pos.xy()));
-            audio.write(AudioEvent::Explosion);
+            explosion_in_viewport(pos, viewport_width, events, audio);
             events.write(GameEvent::Despawn(entity));
         }
     }
@@ -357,7 +368,11 @@ pub fn keypress(
 
                         for (entity, enemy, enemy_transform) in enemy_query.iter_mut() {
                             if enemy.next_index < enemy.keys.len()
-                                && in_viewport(&enemy_transform.translation, viewport_width, None)
+                                && in_viewport(
+                                    &enemy_transform.translation,
+                                    viewport_width,
+                                    Vec2::ZERO,
+                                )
                             {
                                 if let Some(enemy_key) = enemy.keys.chars().next() {
                                     if enemy_key == key {
@@ -421,7 +436,7 @@ fn viewport_width(win: &Window) -> f32 {
 }
 
 pub fn player_movement(
-    time: Res<Time>,
+    time: Res<Time<Virtual>>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut controls: ResMut<MovementControls>,
     mut transform: Single<&mut Transform, With<Player>>,
@@ -486,7 +501,7 @@ pub fn player_movement(
 }
 
 pub fn spawning_enemy(
-    time: Res<Time>,
+    time: Res<Time<Virtual>>,
     mut query: Query<(Entity, &mut Enemy, &mut Spawning, &mut Transform)>,
     mut events: EventWriter<GameEvent>,
     window: Single<&Window>,
@@ -511,7 +526,13 @@ pub fn spawning_enemy(
         let pos = transform.translation;
         if enemy.bounce_timer > 0. {
             collision_movement(&mut enemy, &mut transform, dt);
-        } else if spawn.entered_view || in_viewport(&pos, viewport_width, Some(0.2)) {
+        } else if spawn.entered_view
+            || in_viewport(
+                &pos,
+                viewport_width,
+                Vec2::splat(PLAYER_RADIUS * rand::rng().random_range(4.0..5.0)),
+            )
+        {
             spawn.entered_view = true;
             let radius = pos.length();
             if radius > 0. {
@@ -536,18 +557,15 @@ pub fn spawning_enemy(
     }
 }
 
-fn in_viewport(pos: &Vec3, viewport_width: f32, padding_factor: Option<f32>) -> bool {
-    let (padding_y, padding_x) = padding_factor
-        .map(|p| (VIEWPORT_HEIGHT * p, viewport_width * p))
-        .unwrap_or((0., 0.));
-    pos.x > -viewport_width / 2. + padding_x
-        && pos.x < viewport_width / 2. - padding_x
-        && pos.y > -VIEWPORT_HEIGHT / 2. + padding_y
-        && pos.y < VIEWPORT_HEIGHT / 2. - padding_y
+fn in_viewport(pos: &Vec3, viewport_width: f32, padding: Vec2) -> bool {
+    pos.x > -viewport_width / 2. + padding.x
+        && pos.x < viewport_width / 2. - padding.x
+        && pos.y > -VIEWPORT_HEIGHT / 2. + padding.y
+        && pos.y < VIEWPORT_HEIGHT / 2. - padding.y
 }
 
 pub fn tracking_enemy(
-    time: Res<Time>,
+    time: Res<Time<Virtual>>,
     mut query: Query<(&mut Enemy, &mut Transform), (With<Tracking>, Without<Player>)>,
     player_transform: Single<&Transform, With<Player>>,
 ) {
@@ -613,7 +631,7 @@ pub fn projectile_movement(
     mut audio: EventWriter<AudioEvent>,
     mut enemies_query: Query<(Entity, &mut Enemy, &Transform), (Without<Projectile>,)>,
     stats: Single<(&mut Stats, &mut Text)>,
-    time: Res<Time>,
+    time: Res<Time<Virtual>>,
 ) {
     let (mut stats, mut score_text) = stats.into_inner();
     let mut score_change = false;
@@ -798,7 +816,7 @@ fn closest_point_on_segment(p: Vec2, a: Vec2, b: Vec2) -> Vec2 {
     a + ab * t
 }
 
-pub fn spawner_collisions(
+pub fn update_spawned_relations(
     tracking: Query<(&mut Enemy, &Transform), Without<Spawning>>,
     spawning: Query<(Entity, &mut Enemy, &Transform), With<Spawning>>,
 ) {
@@ -822,10 +840,12 @@ pub fn enemy_collisions(
     mut audio: EventWriter<AudioEvent>,
     mut query: Query<(Entity, &mut Enemy, &Transform)>,
     stats: Single<(&mut Stats, &mut Text)>,
+    window: Single<&Window>,
 ) {
     let (mut stats, mut score_text) = stats.into_inner();
     let mut score_change = false;
     let mut iter = query.iter_combinations_mut();
+    let viewport_width = viewport_width(&window);
 
     while let Some(
         [
@@ -846,6 +866,7 @@ pub fn enemy_collisions(
                         entity_a,
                         &transform_a.translation,
                         if a_to_b { -normal } else { normal },
+                        viewport_width,
                     );
                 }
                 if !enemy_b.colliding {
@@ -855,6 +876,7 @@ pub fn enemy_collisions(
                         entity_b,
                         &transform_b.translation,
                         if a_to_b { normal } else { -normal },
+                        viewport_width,
                     );
                 }
                 stats.alter_score(1);
@@ -874,7 +896,7 @@ fn remove_last(orig: &str) -> String {
 pub fn explosion_system(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut query: Query<(Entity, &mut Transform, &mut ExplosionParticle)>,
-    time: Res<Time>,
+    time: Res<Time<Virtual>>,
     mut events: EventWriter<GameEvent>,
 ) {
     let dt = time.delta_secs();
@@ -897,56 +919,52 @@ pub fn explosion_system(
 
 pub fn player_collisions(
     mut enemies: Query<(&mut Enemy, &Transform), Without<Player>>,
-    mut friends: Query<(Entity, &mut Friend, &Transform), Without<Player>>,
+    mut obstacles: Query<&Transform, (With<Obstacle>, Without<Player>)>,
     mut events: EventWriter<GameEvent>,
     mut audio: EventWriter<AudioEvent>,
     player: Single<(Entity, &Transform), With<Player>>,
-    stats: Single<(&mut Stats, &mut Text)>,
+    mut stats: Single<&mut Stats>,
 ) {
+    if !stats.running {
+        return;
+    }
     let (player_entity, player_transform) = player.into_inner();
     let player_points = PLAYER_LOCAL_TRIANGLE.map(|p| player_transform.transform_point(p));
-    let (mut stats, mut score_text) = stats.into_inner();
 
+    let mut hit = false;
     for (mut e, enemy_transform) in enemies.iter_mut() {
         let points: &[Vec3] = points!(e.shape, enemy_transform);
         if let Some((normal, a_to_b)) = collide(points, &player_points, None) {
-            if stats.running {
-                if !PLAYER_IMMUNE {
-                    stats.running = false;
-                    audio.write(AudioEvent::Explosion);
-                    events.write(GameEvent::Invisible(player_entity));
-                    events.write(GameEvent::Explosion(player_transform.translation.xy()));
-                    events.write(GameEvent::GameEnd);
-                }
-                e.add_collision(if a_to_b { -normal } else { normal });
-            }
+            hit = true;
+            e.add_collision(if a_to_b { -normal } else { normal });
         }
     }
-    let mut score_change = false;
 
-    for (ent, mut f, f_transform) in friends.iter_mut() {
-        if !f.colliding
-            && circle_polygon_collide(
-                f_transform.translation.truncate(),
-                FRIEND_RADIUS,
-                &player_points,
-            )
-            .is_some()
+    for o_transform in obstacles.iter_mut() {
+        if circle_polygon_collide(
+            o_transform.translation.truncate(),
+            OBSTACLE_RADIUS,
+            &player_points,
+        )
+        .is_some()
         {
-            f.colliding = true;
-            score_change = true;
-            stats.alter_score(f.value as isize);
-            events.write(GameEvent::Despawn(ent));
-            audio.write(AudioEvent::CollectFriend);
+            hit = true;
         }
     }
-    if score_change {
-        stats.show(&mut score_text);
+
+    if hit && !PLAYER_IMMUNE {
+        if stats.running {
+            events.write(GameEvent::Explosion(player_transform.translation.xy()));
+            audio.write(AudioEvent::Explosion);
+            events.write(GameEvent::Invisible(player_entity));
+            events.write(GameEvent::GameEnd);
+        }
+        stats.running = false;
     }
 }
 
 pub fn spawn_enemies(
-    time: Res<Time>,
+    time: Res<Time<Fixed>>,
     mut events: EventWriter<GameEvent>,
     mut spawner: ResMut<Spawner>,
     window: Single<&Window>,
@@ -958,8 +976,8 @@ pub fn spawn_enemies(
         let angle = rng.random_range(0.0..std::f32::consts::TAU);
 
         let width = viewport_width(&window);
-        let x = width * 0.5 * ENEMY_SPAWN_LOCATION_MULTIPLIER * angle.cos();
-        let y = VIEWPORT_HEIGHT * 0.5 * ENEMY_SPAWN_LOCATION_MULTIPLIER * angle.sin();
+        let x = width * 0.5 * SPAWN_LOCATION_MULTIPLIER * angle.cos();
+        let y = VIEWPORT_HEIGHT * 0.5 * SPAWN_LOCATION_MULTIPLIER * angle.sin();
         let shape = SHAPES
             .iter()
             .find(|s| spawner.enemy_spawns_since[s.id()] >= ENEMY_FORCE_SUMMONS[s.id()] as usize)
@@ -970,59 +988,52 @@ pub fn spawn_enemies(
 
         events.write(GameEvent::SpawnEnemy(*shape, Vec2::new(x, y), None));
 
-        spawner.delay_lower =
-            (spawner.delay_lower * SPAWN_ENEMY_DELAY_DECAY_RATE).max(SPAWN_ENEMY_DELAY_MIN_LOWER);
-        spawner.delay_upper =
-            (spawner.delay_upper * SPAWN_ENEMY_DELAY_DECAY_RATE).max(SPAWN_ENEMY_DELAY_MIN_UPPER);
+        spawner.enemy_delay_lower =
+            (spawner.enemy_delay_lower * SPAWN_DELAY_DECAY_RATE).max(SPAWN_ENEMY_DELAY_MIN_LOWER);
+        spawner.enemy_delay_upper =
+            (spawner.enemy_delay_upper * SPAWN_DELAY_DECAY_RATE).max(SPAWN_ENEMY_DELAY_MIN_UPPER);
 
-        let t = rng.random::<f32>().powf(2.);
-        spawner.enemy_delay = spawner.delay_lower + t * (spawner.delay_upper - spawner.delay_lower);
+        spawner.enemy_delay = rng.random_range(spawner.enemy_delay_lower..spawner.enemy_delay_upper)
     }
 }
 
-pub fn spawn_friends(
-    time: Res<Time>,
+pub fn spawn_obstacles(
+    time: Res<Time<Fixed>>,
     mut events: EventWriter<GameEvent>,
     mut spawner: ResMut<Spawner>,
-    friends: Query<&Transform, Without<Enemy>>,
-    mut audio: EventWriter<AudioEvent>,
     window: Single<&Window>,
+    player_transform: Single<&Transform, With<Player>>,
 ) {
-    spawner.friend_delay -= time.delta_secs();
+    spawner.obstacle_delay -= time.delta_secs();
 
-    if spawner.friend_delay <= 0. {
+    if spawner.obstacle_delay <= 0. {
         let mut rng = rand::rng();
 
         let width = viewport_width(&window);
-        let half_width = (width * FRIEND_SPAWN_LOCATION_MULTIPLIER) * 0.5;
-        let half_height = (VIEWPORT_HEIGHT * FRIEND_SPAWN_LOCATION_MULTIPLIER) * 0.5;
-        let mut overlap = true;
-        let mut pos = Vec2::ZERO;
-        let mut tries = 0;
-        while overlap {
-            let x = rng.random_range(-half_width..half_width);
-            let y = rng.random_range(-half_height..half_height);
-            pos = Vec2::new(x, y);
-            overlap = false;
-            for t in friends {
-                if pos.distance(t.translation.xy()) > FRIEND_RADIUS * 2. {
-                    overlap = false;
-                }
-            }
-            tries += 1;
-            if tries >= 5 {
-                overlap = false;
-            }
-        }
-        events.write(GameEvent::SpawnFriend(pos));
-        audio.write(AudioEvent::SpawnFriend);
-        spawner.friend_delay = rng.random_range(FRIEND_SPAWN_DELAY_LOWER..FRIEND_SPAWN_DELAY_UPPER);
+        let angle = rng.random_range(0.0..std::f32::consts::TAU);
+        let x = width * 0.5 * SPAWN_LOCATION_MULTIPLIER * angle.cos();
+        let y = VIEWPORT_HEIGHT * 0.5 * SPAWN_LOCATION_MULTIPLIER * angle.sin();
+        let pos = Vec2::new(x, y);
+        events.write(GameEvent::SpawnObstacle(
+            pos,
+            (player_transform.translation.xy() - pos).normalize(),
+        ));
+        spawner.obstacle_delay_lower = (spawner.obstacle_delay_lower * SPAWN_DELAY_DECAY_RATE)
+            .max(SPAWN_OBSTACLE_DELAY_MIN_LOWER);
+        spawner.obstacle_delay_upper = (spawner.obstacle_delay_upper * SPAWN_DELAY_DECAY_RATE)
+            .max(SPAWN_OBSTACLE_DELAY_MIN_UPPER);
+
+        spawner.obstacle_delay =
+            rng.random_range(spawner.obstacle_delay_lower..spawner.obstacle_delay_upper)
     }
 }
 
-pub fn reset_collisions(mut query: Query<&mut Enemy>) {
-    for mut e in query.iter_mut() {
+pub fn reset_collisions(mut enemies: Query<&mut Enemy>, mut obstacles: Query<&mut Obstacle>) {
+    for mut e in enemies.iter_mut() {
         e.colliding = false;
+    }
+    for mut o in obstacles.iter_mut() {
+        o.colliding = false;
     }
 }
 
@@ -1086,34 +1097,49 @@ pub fn track_selected_enemy(
     }
 }
 
-pub fn friend_enemy_collisions(
-    mut enemies: Query<(Entity, &mut Enemy, &Transform), Without<Friend>>,
-    mut friends: Query<(Entity, &mut Friend, &Transform), Without<Enemy>>,
+pub fn obstacle_collisions(
+    mut enemies: Query<(Entity, &mut Enemy, &Transform), Without<Obstacle>>,
+    mut obstacles: Query<(&mut Obstacle, &Transform), Without<Enemy>>,
     mut events: EventWriter<GameEvent>,
     mut audio: EventWriter<AudioEvent>,
+    window: Single<&Window>,
 ) {
-    for (f_ent, mut f, f_transform) in friends.iter_mut() {
+    let viewport_width = viewport_width(&window);
+
+    for (_, o_transform) in obstacles.iter_mut() {
         for (e_ent, mut e, e_transform) in enemies.iter_mut() {
             let e_points: &[Vec3] = points!(e.shape, e_transform);
-            if !f.colliding && !e.colliding {
+            if !e.colliding {
                 if let Some(normal) = circle_polygon_collide(
-                    f_transform.translation.truncate(),
-                    FRIEND_RADIUS,
+                    o_transform.translation.truncate(),
+                    OBSTACLE_RADIUS,
                     e_points,
                 ) {
-                    f.colliding = true;
-                    events.write(GameEvent::Despawn(f_ent));
-                    events.write(GameEvent::Explosion(f_transform.translation.xy()));
-                    audio.write(AudioEvent::Explosion);
                     e.collision_with_enemy(
                         &mut events,
                         &mut audio,
                         e_ent,
                         &e_transform.translation,
                         -normal,
+                        viewport_width,
                     );
                 }
             }
+        }
+    }
+    let mut iter = obstacles.iter_combinations_mut();
+    while let Some([(mut a, a_transform), (mut b, b_transform)]) = iter.fetch_next() {
+        if a.colliding || b.colliding {
+            continue;
+        }
+        if a_transform.translation.distance(b_transform.translation) < OBSTACLE_RADIUS * 2.0 {
+            a.colliding = true;
+            b.colliding = true;
+            let a_to_b = (b_transform.translation - a_transform.translation)
+                .xy()
+                .normalize();
+            a.direction = -1. * a_to_b / 2.0;
+            b.direction = a_to_b / 2.0;
         }
     }
 }
@@ -1131,32 +1157,33 @@ fn point_launcher(
     launcher_transform.rotation = Quat::from_rotation_z(angle);
 }
 
-pub fn update_friends(
-    mut friends: Query<(Entity, &mut Friend, &mut Text2d, &Transform), Without<Player>>,
+pub fn obstacle(
+    mut obstacles: Query<(Entity, &mut Obstacle, &mut Transform)>,
     mut events: EventWriter<GameEvent>,
-    mut audio: EventWriter<AudioEvent>,
-    stats: Single<(&mut Stats, &mut Text)>,
-    time: Res<Time>,
+    time: Res<Time<Virtual>>,
+    window: Single<&Window>,
 ) {
-    let (mut stats, mut score_text) = stats.into_inner();
-    let mut score_change = false;
-    for (ent, mut f, mut text, transform) in friends.iter_mut() {
-        f.lifetime += time.delta_secs();
-        if f.lifetime > (FRIEND_START_VALUE + 1 - f.value) as f32 {
-            if f.value == 1 {
-                stats.alter_score(-(FRIEND_POINT_DEDUCTION as isize));
-                score_change = true;
-                events.write(GameEvent::Despawn(ent));
-                events.write(GameEvent::Explosion(transform.translation.xy()));
-                audio.write(AudioEvent::Explosion);
-            } else {
-                f.value -= 1;
-                **text = format!("{}", f.value);
+    let viewport_width = viewport_width(&window);
+    let dt = time.delta_secs();
+    for (ent, mut o, mut transform) in obstacles.iter_mut() {
+        let in_viewport = in_viewport(
+            &transform.translation,
+            viewport_width,
+            Vec2::splat(-OBSTACLE_RADIUS),
+        );
+        transform.translation +=
+            o.direction.extend(OBSTACLE_Z_INDEX) * OBSTACLE_MOVEMENT_SPEED * dt;
+        if o.entered_viewport && !in_viewport {
+            events.write(GameEvent::Despawn(ent));
+        } else {
+            o.entered_viewport = in_viewport;
+            if !o.entered_viewport {
+                o.time_to_enter_viewport -= dt;
+                if o.time_to_enter_viewport <= 0. {
+                    events.write(GameEvent::Despawn(ent));
+                }
             }
         }
-    }
-    if score_change {
-        stats.show(&mut score_text);
     }
 }
 

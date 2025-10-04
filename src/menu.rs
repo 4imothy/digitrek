@@ -45,8 +45,6 @@ pub enum Label {
     LaunchProjectileSound,
     ExplosionSound,
     MistypeSound,
-    FriendSpawnSound,
-    CollectFriendSound,
     Help,
     HelpBack,
     Resume,
@@ -75,8 +73,6 @@ impl Label {
             Label::LaunchProjectileSound => Some(credits::LAUNCH_PROJECTILE_SOUND_LINK),
             Label::ExplosionSound => Some(credits::EXPLOSION_SOUND_LINK),
             Label::MistypeSound => Some(credits::MISTYPE_SOUND_LINK),
-            Label::FriendSpawnSound => Some(credits::FRIEND_SPAWN_SOUND_LINK),
-            Label::CollectFriendSound => Some(credits::COLLECT_FRIEND_SOUND_LINK),
             _ => None,
         }
     }
@@ -314,9 +310,7 @@ fn do_action(
         | Label::GameEngine
         | Label::LaunchProjectileSound
         | Label::ExplosionSound
-        | Label::MistypeSound
-        | Label::FriendSpawnSound
-        | Label::CollectFriendSound => {
+        | Label::MistypeSound => {
             #[cfg(not(target_arch = "wasm32"))]
             let _ = open::that(action.to_link().unwrap());
 
@@ -471,7 +465,7 @@ pub fn help_setup(mut commands: Commands, config: Res<Config>) {
         .with_children(|screen| {
             screen.spawn((
                 Text::new(format!(
-                    "avoid the polygons while collecting circles\nuse {}{}{}{} to move\nuse the right side of the keyboard to defeat polygons",
+                    "avoid polygons and circles\nuse {}{}{}{} to move\nuse the right side of the keyboard to defeat polygons",
                     config.up_char(),
                     config.left_char(),
                     config.down_char(),
@@ -710,11 +704,6 @@ pub fn credits_setup(mut commands: Commands) {
                 ),
                 (Label::ExplosionSound, credits::EXPLOSION_SOUND_TEXT),
                 (Label::MistypeSound, credits::MISTYPE_SOUND_TEXT),
-                (Label::FriendSpawnSound, credits::FRIEND_SPAWN_SOUND_TEXT),
-                (
-                    Label::CollectFriendSound,
-                    credits::COLLECT_FRIEND_SOUND_TEXT,
-                ),
             ] {
                 let mut ent = screen.spawn((
                     label,
@@ -925,13 +914,9 @@ pub fn keypress(
         (Label::LaunchProjectileSound, -1) => Some(Label::GameEngine),
         (Label::ExplosionSound, 1) => Some(Label::MistypeSound),
         (Label::ExplosionSound, -1) => Some(Label::LaunchProjectileSound),
-        (Label::MistypeSound, 1) => Some(Label::FriendSpawnSound),
+        (Label::MistypeSound, 1) => Some(Label::CreditsBack),
         (Label::MistypeSound, -1) => Some(Label::ExplosionSound),
-        (Label::FriendSpawnSound, 1) => Some(Label::CollectFriendSound),
-        (Label::FriendSpawnSound, -1) => Some(Label::MistypeSound),
-        (Label::CollectFriendSound, -1) => Some(Label::FriendSpawnSound),
-        (Label::CollectFriendSound, 1) => Some(Label::CreditsBack),
-        (Label::CreditsBack, -1) => Some(Label::CollectFriendSound),
+        (Label::CreditsBack, -1) => Some(Label::MistypeSound),
         (Label::Resume, 1) => Some(Label::GameSettings),
         (Label::GameSettings, 1) => Some(Label::PauseBack),
         (Label::GameSettings, -1) => Some(Label::Resume),
