@@ -881,7 +881,11 @@ pub fn enemy_collisions(
                         viewport_width,
                     );
                 }
-                stats.alter_score(1);
+                if in_viewport(&transform_a.translation, viewport_width, Vec2::ZERO)
+                    && in_viewport(&transform_b.translation, viewport_width, Vec2::ZERO)
+                {
+                    stats.alter_score(1);
+                }
                 score_change = true;
             }
         }
