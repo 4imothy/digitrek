@@ -30,21 +30,25 @@ const RHOMBUS_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 8.;
 const PENTAGON_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 6.;
 const PENTAGON_ROTATION_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 6.;
 const PROJECTILE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED * 4.;
-const OBSTACLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 3.;
+const OBSTACLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 2.;
 const OBSTACLE_FIELD_TIME_TO_ENTER_VIEWPORT: f32 = 5.;
 
-const INITIAL_ENEMY_SPAWN_DELAY: f32 = 0.;
-const INITIAL_ENEMY_SPAWN_DELAY_LOWER: f32 = 1.0;
-const INITIAL_ENEMY_SPAWN_DELAY_UPPER: f32 = 5.0;
-const SPAWN_ENEMY_DELAY_MIN_LOWER: f32 = 0.5;
-const SPAWN_ENEMY_DELAY_MIN_UPPER: f32 = 2.;
-const INITIAL_OBSTACLE_SPAWN_DELAY: f32 = 0.5;
-const INITIAL_OBSTACLE_SPAWN_DELAY_LOWER: f32 = 5.0;
-const INITIAL_OBSTACLE_SPAWN_DELAY_UPPER: f32 = 10.0;
-const SPAWN_OBSTACLE_DELAY_MIN_LOWER: f32 = 4.0;
-const SPAWN_OBSTACLE_DELAY_MIN_UPPER: f32 = 5.;
-const SPAWNER_ENEMY_SPAWN_DELAY: f32 = 4.;
-const SPAWN_DELAY_DECAY_RATE: f32 = 0.95;
+const FIRST_ENEMY_SPAWN_DELAY: f32 = 0.;
+const FIRST_OBSTACLE_SPAWN_DELAY: f32 = 2.;
+const INITIAL_ENEMY_SPAWN_DELAY_MU: f32 = 4.;
+const INITIAL_OBSTACLE_SPAWN_DELAY_MU: f32 = 8.;
+const ENEMY_SPAWN_DELAY_MIN_MU: f32 = 1.0;
+const OBSTACLE_SPAWN_DELAY_MIN_MU: f32 = 4.;
+const SPAWN_DELTA: f32 = 0.3;
+const SPAWNER_ENEMY_SPAWN_DELAY: f32 = 3.;
+const TIME_TO_MAX_DIF: f32 = 70.;
+
+static ENEMY_SPAWN_DECAY_RATE: LazyLock<f32> = LazyLock::new(|| {
+    (ENEMY_SPAWN_DELAY_MIN_MU / INITIAL_ENEMY_SPAWN_DELAY_MU).ln() / -TIME_TO_MAX_DIF
+});
+static OBSTACLE_SPAWN_DECAY_RATE: LazyLock<f32> = LazyLock::new(|| {
+    (OBSTACLE_SPAWN_DELAY_MIN_MU / INITIAL_OBSTACLE_SPAWN_DELAY_MU).ln() / -TIME_TO_MAX_DIF
+});
 
 const PLAYER_RADIUS: f32 = 50.;
 const OBSTACLE_RADIUS: f32 = PLAYER_RADIUS / 1.5;
@@ -123,7 +127,7 @@ const BOUNCE_DURATION: f32 = 0.5;
 
 const NUM_SHAPES: usize = 3;
 const SHAPES: [Shape; NUM_SHAPES] = [Shape::Triangle, Shape::Rhombus, Shape::Pentagon];
-const ENEMY_SPAWN_WEIGHTS: [f32; NUM_SHAPES] = [0.3, 0.4, 0.3];
+const ENEMY_SPAWN_WEIGHTS: [f32; NUM_SHAPES] = [0.1, 0.5, 0.4];
 const ENEMY_SPAWN_SINCE_FACTOR: f32 = 5.;
 const ENEMY_FORCE_SUMMONS: [f32; 3] = [
     ENEMY_SPAWN_SINCE_FACTOR / ENEMY_SPAWN_WEIGHTS[0],
@@ -174,7 +178,7 @@ const SPAWN_LOCATION_MULTIPLIER: f32 = 1.5;
 
 const EXPLOSION_PARTICLE_MAX_LIFETIME: f32 = 1.;
 const EXPLOSION_PARTICLE_INITIAL_ALPHA: f32 = 0.7;
-const GAME_OVER_SLOWDOWN_REAL_TIME: f32 = 3.0;
+const GAME_OVER_SLOWDOWN_REAL_TIME: f32 = 3.;
 const TIME_BEFORE_RESUME: f32 = 3.;
 
 const HIGH_SCORE_KEY: &str = "high_score";
@@ -442,6 +446,7 @@ fn game_plugin(app: &mut App) {
                 game::spawn_enemies,
                 game::spawn_obstacles,
                 game::track_selected_enemy,
+                game::update_clock,
             )
                 .run_if(in_state(Screen::Game)),
         )
@@ -573,13 +578,11 @@ enum PauseMsg {
 #[derive(Resource)]
 struct Spawner {
     enemy_dist: WeightedIndex<f32>,
-    enemy_delay: f32,
-    enemy_delay_lower: f32,
-    enemy_delay_upper: f32,
     enemy_spawns_since: [usize; NUM_SHAPES],
+    enemy_delay: f32,
+    enemy_delay_mu: f32,
     obstacle_delay: f32,
-    obstacle_delay_lower: f32,
-    obstacle_delay_upper: f32,
+    obstacle_delay_mu: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -703,6 +706,9 @@ struct ResumeCountdown {
 
 #[derive(Resource)]
 struct VolumeDrag(bool);
+
+#[derive(Resource)]
+struct Clock(f32);
 
 fn toggle_pause(mut msg: MessageWriter<PauseMsg>) {
     msg.write(PauseMsg::TogglePause);

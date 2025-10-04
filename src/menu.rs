@@ -117,12 +117,12 @@ pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
             cmd.spawn((Node {
                 justify_content: JustifyContent::SpaceBetween,
                 align_items: AlignItems::Center,
-                margin: UiRect::bottom(Val::Vh(-6.0)),
+                margin: UiRect::bottom(Val::Vh(-6.)),
                 ..default()
             },))
                 .with_children(|title| {
                     let angle_span = PI / 2.5;
-                    let angle_start = -angle_span / 2.0;
+                    let angle_start = -angle_span / 2.;
                     for (i, c) in env!("CARGO_PKG_NAME").chars().enumerate() {
                         let angle = angle_start + i as f32 * (angle_span / (8 - 1) as f32);
                         title.spawn((
@@ -324,7 +324,7 @@ fn do_action(
         }
         Label::PauseBack | Label::EndBack => {
             vtime.unpause();
-            vtime.set_relative_speed(1.0);
+            vtime.set_relative_speed(1.);
             next_screen.set(Screen::MainMenu);
         }
         Label::GameSettings => {
@@ -336,7 +336,7 @@ fn do_action(
         }
         Label::PlayAgain => {
             vtime.unpause();
-            vtime.set_relative_speed(1.0);
+            vtime.set_relative_speed(1.);
             next_screen.set(Screen::Game);
         }
         _ => {}
@@ -507,7 +507,7 @@ pub fn game_settings_setup(mut commands: Commands, config: Res<Config>) {
                 ..screen_node()
             },
             BorderRadius::all(Val::Percent(5.)),
-            BackgroundColor(colors::IN_GAME_MENU.with_alpha(1.0)),
+            BackgroundColor(colors::IN_GAME_MENU.with_alpha(1.)),
         ))
         .with_children(|screen| {
             add_volume(screen, &config);
@@ -662,7 +662,7 @@ fn add_volume(par: &mut RelatedSpawnerCommands<ChildOf>, config: &Config) {
     par.spawn((
         Node {
             width: Val::Vw(40.),
-            height: Val::Vh(3.0),
+            height: Val::Vh(3.),
             justify_content: JustifyContent::FlexStart,
             align_items: AlignItems::Center,
             ..button()
@@ -979,7 +979,7 @@ pub fn volume_drag_control(
     }
 
     if let Some(p) = bar_rcp.normalized {
-        let percent = (p.x * 100.0).clamp(0.0, 100.0);
+        let percent = (p.x * 100.).clamp(0., 100.);
         config.set_vol(percent as u8);
     }
 }

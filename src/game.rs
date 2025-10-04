@@ -34,7 +34,7 @@ pub fn setup(
 
     commands
         .spawn((
-            Mesh2d(meshes.add(CircularSector::new(PLAYER_RADIUS, PI / 6.0))),
+            Mesh2d(meshes.add(CircularSector::new(PLAYER_RADIUS, PI / 6.))),
             MeshMaterial2d(materials.add(colors::PLAYER)),
             Transform {
                 translation: Vec3::new(0., PLAYER_RADIUS, PLAYER_Z_INDEX),
@@ -157,13 +157,11 @@ pub fn setup(
     ));
     commands.insert_resource(Spawner {
         enemy_dist: WeightedIndex::new(ENEMY_SPAWN_WEIGHTS).unwrap(),
-        enemy_delay: INITIAL_ENEMY_SPAWN_DELAY,
-        obstacle_delay: INITIAL_OBSTACLE_SPAWN_DELAY,
+        enemy_delay: FIRST_ENEMY_SPAWN_DELAY,
+        obstacle_delay: FIRST_OBSTACLE_SPAWN_DELAY,
         enemy_spawns_since: [0, 0, 0],
-        enemy_delay_lower: INITIAL_ENEMY_SPAWN_DELAY_LOWER,
-        enemy_delay_upper: INITIAL_ENEMY_SPAWN_DELAY_UPPER,
-        obstacle_delay_lower: INITIAL_OBSTACLE_SPAWN_DELAY_LOWER,
-        obstacle_delay_upper: INITIAL_OBSTACLE_SPAWN_DELAY_UPPER,
+        obstacle_delay_mu: INITIAL_OBSTACLE_SPAWN_DELAY_MU,
+        enemy_delay_mu: INITIAL_ENEMY_SPAWN_DELAY_MU,
     });
     commands.insert_resource(AudioAssets {
         projectile_launch: asset_server.load("projectile_launch.ogg"),
@@ -171,6 +169,7 @@ pub fn setup(
         explosion: asset_server.load("explosion.ogg"),
     });
     commands.insert_resource(MovementControls { v: None, h: None });
+    commands.insert_resource(Clock(0.));
 }
 
 impl Shape {
@@ -189,6 +188,10 @@ impl Shape {
             Shape::Pentagon => Some(Shape::Rhombus),
         }
     }
+}
+
+pub fn update_clock(mut t: ResMut<Clock>, time: Res<Time<Virtual>>) {
+    t.0 += time.delta_secs();
 }
 
 fn explosion_in_viewport(
@@ -470,14 +473,8 @@ pub fn player_movement(
             controls.v = None;
         }
 
-        let rotation_factor = controls
-            .h
-            .map(|v| if v { -1.0 } else { 1.0 })
-            .unwrap_or(0.0);
-        let movement_factor = controls
-            .v
-            .map(|v| if v { -1.0 } else { 1.0 })
-            .unwrap_or(0.0);
+        let rotation_factor = controls.h.map(|v| if v { -1. } else { 1. }).unwrap_or(0.);
+        let movement_factor = controls.v.map(|v| if v { -1. } else { 1. }).unwrap_or(0.);
 
         let dt = time.delta_secs();
         let rotation_delta = rotation_factor * PLAYER_ROTATION_SPEED * dt;
@@ -971,6 +968,7 @@ pub fn player_collisions(
 
 pub fn spawn_enemies(
     time: Res<Time<Fixed>>,
+    clock: Res<Clock>,
     mut msg: MessageWriter<GameMsg>,
     mut spawner: ResMut<Spawner>,
     window: Single<&Window>,
@@ -994,17 +992,19 @@ pub fn spawn_enemies(
 
         msg.write(GameMsg::SpawnEnemy(*shape, Vec2::new(x, y), None));
 
-        spawner.enemy_delay_lower =
-            (spawner.enemy_delay_lower * SPAWN_DELAY_DECAY_RATE).max(SPAWN_ENEMY_DELAY_MIN_LOWER);
-        spawner.enemy_delay_upper =
-            (spawner.enemy_delay_upper * SPAWN_DELAY_DECAY_RATE).max(SPAWN_ENEMY_DELAY_MIN_UPPER);
+        spawner.enemy_delay_mu = (INITIAL_ENEMY_SPAWN_DELAY_MU
+            * f32::exp(-1. * *ENEMY_SPAWN_DECAY_RATE * clock.0))
+        .max(ENEMY_SPAWN_DELAY_MIN_MU);
 
-        spawner.enemy_delay = rng.random_range(spawner.enemy_delay_lower..spawner.enemy_delay_upper)
+        spawner.enemy_delay = rng.random_range(
+            spawner.enemy_delay_mu - SPAWN_DELTA..spawner.enemy_delay_mu + SPAWN_DELTA,
+        )
     }
 }
 
 pub fn spawn_obstacles(
     time: Res<Time<Fixed>>,
+    clock: Res<Clock>,
     mut msg: MessageWriter<GameMsg>,
     mut spawner: ResMut<Spawner>,
     window: Single<&Window>,
@@ -1024,13 +1024,14 @@ pub fn spawn_obstacles(
             pos,
             (player_transform.translation.xy() - pos).normalize(),
         ));
-        spawner.obstacle_delay_lower = (spawner.obstacle_delay_lower * SPAWN_DELAY_DECAY_RATE)
-            .max(SPAWN_OBSTACLE_DELAY_MIN_LOWER);
-        spawner.obstacle_delay_upper = (spawner.obstacle_delay_upper * SPAWN_DELAY_DECAY_RATE)
-            .max(SPAWN_OBSTACLE_DELAY_MIN_UPPER);
 
-        spawner.obstacle_delay =
-            rng.random_range(spawner.obstacle_delay_lower..spawner.obstacle_delay_upper)
+        spawner.obstacle_delay_mu = (INITIAL_OBSTACLE_SPAWN_DELAY_MU
+            * f32::exp(-1. * *OBSTACLE_SPAWN_DECAY_RATE * clock.0))
+        .max(OBSTACLE_SPAWN_DELAY_MIN_MU);
+
+        spawner.obstacle_delay = rng.random_range(
+            spawner.obstacle_delay_mu - SPAWN_DELTA..spawner.obstacle_delay_mu + SPAWN_DELTA,
+        )
     }
 }
 
@@ -1138,14 +1139,14 @@ pub fn obstacle_collisions(
         if a.colliding || b.colliding {
             continue;
         }
-        if a_transform.translation.distance(b_transform.translation) < OBSTACLE_RADIUS * 2.0 {
+        if a_transform.translation.distance(b_transform.translation) < OBSTACLE_RADIUS * 2. {
             a.colliding = true;
             b.colliding = true;
             let a_to_b = (b_transform.translation - a_transform.translation)
                 .xy()
                 .normalize();
-            a.direction = -1. * a_to_b / 2.0;
-            b.direction = a_to_b / 2.0;
+            a.direction = -1. * a_to_b / 2.;
+            b.direction = a_to_b / 2.;
         }
     }
 }
@@ -1230,14 +1231,14 @@ pub fn slowdown_time(
     if let GameScreen::Running = **screen {
         slowdown.time -= rtime.delta_secs();
 
-        if slowdown.time <= 0.0 {
+        if slowdown.time <= 0. {
             vtime.pause();
             next_screen.set(GameScreen::End);
         } else {
             let total = GAME_OVER_SLOWDOWN_REAL_TIME;
-            let linear = 1.0 - (slowdown.time / total).clamp(0.0, 1.0);
+            let linear = 1. - (slowdown.time / total).clamp(0., 1.);
             let eased = linear.powf(0.4);
-            let new_speed = 1.0 - eased * 0.9;
+            let new_speed = 1. - eased * 0.9;
             vtime.set_relative_speed(new_speed);
         }
     }
