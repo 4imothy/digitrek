@@ -475,6 +475,7 @@ fn game_plugin(app: &mut App) {
                 game::reset_collisions.after(msg::on_msg),
                 game::despawner.after(msg::on_msg),
                 game::lock_enemy_text.before(TransformSystems::Propagate),
+                game::lock_enemy_text.after(msg::on_msg),
             )
                 .run_if(in_state(Screen::Game)),
         )
