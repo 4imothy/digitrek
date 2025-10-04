@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use rand::{self, Rng, rngs::ThreadRng};
 
 pub fn on_toggle_pause(
-    mut events: EventReader<PauseEvent>,
+    mut msg: MessageReader<PauseMsg>,
     mut time: ResMut<Time<Virtual>>,
     mut next_screen: ResMut<NextState<GameScreen>>,
     game_screen: Res<State<GameScreen>>,
@@ -13,9 +13,9 @@ pub fn on_toggle_pause(
     mut config: ResMut<Config>,
     stats: Single<&mut Stats>,
 ) {
-    for event in events.read() {
-        match event {
-            PauseEvent::TogglePause => {
+    for msg in msg.read() {
+        match msg {
+            PauseMsg::TogglePause => {
                 if let GameScreen::ResumeCountdown = **game_screen {
                     next_screen.set(GameScreen::Pause);
                 } else if let GameScreen::Pause = **game_screen {
@@ -30,20 +30,20 @@ pub fn on_toggle_pause(
     }
 }
 
-pub fn on_event(
+pub fn on_msg(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    mut events: EventReader<GameEvent>,
-    enemies: Query<&Enemy, Without<Despawn>>,
+    mut msg: MessageReader<GameMsg>,
+    enemies: Query<&Enemy, Without<ToDespawn>>,
     mut config: ResMut<Config>,
     stats: Single<&mut Stats>,
     mut pkv: ResMut<PkvStore>,
 ) {
     let mut rng = rand::rng();
-    for event in events.read() {
-        match event {
-            GameEvent::Explosion(position) => {
+    for msg in msg.read() {
+        match msg {
+            GameMsg::Explosion(position) => {
                 spawn_explosion(
                     &mut rng,
                     &mut commands,
@@ -52,16 +52,16 @@ pub fn on_event(
                     position,
                 );
             }
-            GameEvent::Despawn(entity) => {
-                commands.entity(*entity).insert(Despawn);
+            GameMsg::Despawn(entity) => {
+                commands.entity(*entity).insert(ToDespawn);
             }
-            GameEvent::DespawnChildren(entity) => {
+            GameMsg::DespawnChildren(entity) => {
                 commands.entity(*entity).despawn_related::<Children>();
             }
-            GameEvent::ReplaceShape(entity, shape) => {
+            GameMsg::ReplaceShape(entity, shape) => {
                 replace_shape(&mut commands, &mut meshes, &mut materials, *entity, shape);
             }
-            GameEvent::AddText(entity) => {
+            GameMsg::AddText(entity) => {
                 let mut cmd = commands.entity(*entity);
                 if let Ok(enemy) = enemies.get(*entity) {
                     if !enemy.keys.is_empty() {
@@ -69,7 +69,7 @@ pub fn on_event(
                     }
                 }
             }
-            GameEvent::SpawnEnemy(shape, pos, spawned_by) => {
+            GameMsg::SpawnEnemy(shape, pos, spawned_by) => {
                 spawn_enemy(
                     &mut rng,
                     &mut commands,
@@ -81,7 +81,7 @@ pub fn on_event(
                     &config,
                 );
             }
-            GameEvent::SpawnObstacle(pos, direction) => {
+            GameMsg::SpawnObstacle(pos, direction) => {
                 commands.spawn((
                     Obstacle {
                         direction: *direction,
@@ -95,19 +95,19 @@ pub fn on_event(
                     FONT.clone(),
                 ));
             }
-            GameEvent::Invisible(entity) => {
+            GameMsg::Invisible(entity) => {
                 commands.entity(*entity).insert(Visibility::Hidden);
             }
-            GameEvent::Visible(entity) => {
+            GameMsg::Visible(entity) => {
                 commands.entity(*entity).insert(Visibility::Visible);
             }
-            GameEvent::Select(entity) => {
+            GameMsg::Select(entity) => {
                 commands.entity(*entity).insert(Selected);
             }
-            GameEvent::DeSelect(entity) => {
+            GameMsg::DeSelect(entity) => {
                 commands.entity(*entity).remove::<Selected>();
             }
-            GameEvent::Projectile(entity, origin) => {
+            GameMsg::Projectile(entity, origin) => {
                 commands.spawn((
                     Mesh2d(meshes.add(Circle::new(PROJECTILE_RADIUS))),
                     MeshMaterial2d(materials.add(colors::PROJECTILE)),
@@ -115,7 +115,7 @@ pub fn on_event(
                     Projectile { target: *entity },
                 ));
             }
-            GameEvent::GameEnd => {
+            GameMsg::GameEnd => {
                 stats.save_high_score(&mut config, &mut pkv);
                 commands.spawn(Slowdown {
                     time: GAME_OVER_SLOWDOWN_REAL_TIME,
@@ -288,7 +288,7 @@ fn replace_shape(
 
 pub fn on_audio(
     mut commands: Commands,
-    mut audio: EventReader<AudioEvent>,
+    mut audio: MessageReader<AudioMsg>,
     sounds: Res<AudioAssets>,
 ) {
     for a in audio.read() {

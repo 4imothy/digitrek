@@ -114,33 +114,33 @@ pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
     commands
         .spawn(screen_with(MenuScreen))
         .with_children(|cmd| {
-            cmd.spawn(Node {
+            cmd.spawn((Node {
                 justify_content: JustifyContent::SpaceBetween,
                 align_items: AlignItems::Center,
                 margin: UiRect::bottom(Val::Vh(-6.0)),
                 ..default()
-            })
-            .with_children(|title| {
-                let angle_span = PI / 2.5;
-                let angle_start = -angle_span / 2.0;
-                for (i, c) in env!("CARGO_PKG_NAME").chars().enumerate() {
-                    let angle = angle_start + i as f32 * (angle_span / (8 - 1) as f32);
-                    title.spawn((
-                        Text::new(c),
-                        TITLE_FONT.clone(),
-                        Transform::from_rotation(Quat::from_rotation_z(angle)),
-                        Node {
-                            padding: UiRect::new(
-                                Val::Vh(0.),
-                                Val::Vw(1.),
-                                Val::Vh(0.),
-                                Val::Vh(10. * (PI / 7. * i as f32).sin()),
-                            ),
-                            ..default()
-                        },
-                    ));
-                }
-            });
+            },))
+                .with_children(|title| {
+                    let angle_span = PI / 2.5;
+                    let angle_start = -angle_span / 2.0;
+                    for (i, c) in env!("CARGO_PKG_NAME").chars().enumerate() {
+                        let angle = angle_start + i as f32 * (angle_span / (8 - 1) as f32);
+                        title.spawn((
+                            Text::new(c),
+                            TITLE_FONT.clone(),
+                            UiTransform::from_rotation(Rot2::radians(angle)),
+                            Node {
+                                padding: UiRect::new(
+                                    Val::Vh(0.),
+                                    Val::Vw(1.),
+                                    Val::Vh(0.),
+                                    Val::Vh(10. * (PI / 7. * i as f32).sin()),
+                                ),
+                                ..default()
+                            },
+                        ));
+                    }
+                });
 
             cmd.spawn((
                 Text::new(format!("highscore: {}", config.high_score)),
@@ -159,7 +159,7 @@ pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
                 let mut entity = cmd.spawn((
                     Button,
                     Node { ..button() },
-                    BorderColor(colors::UNSELECTED_OUTLINE),
+                    BorderColor::all(colors::UNSELECTED_OUTLINE),
                     BorderRadius::MAX,
                     action,
                 ));
@@ -180,11 +180,11 @@ pub fn on_selection(
 ) {
     for entity in removed.read() {
         if let Ok(mut border) = borders.get_mut(entity) {
-            *border = BorderColor(colors::UNSELECTED_OUTLINE);
+            *border = BorderColor::all(colors::UNSELECTED_OUTLINE);
         }
     }
     if let Ok(mut new) = borders.get_mut(*selection) {
-        new.0 = colors::SELECTED_OUTLINE;
+        *new = BorderColor::all(colors::SELECTED_OUTLINE);
     }
 }
 
@@ -195,12 +195,12 @@ pub fn on_active(
 ) {
     for entity in removed.read() {
         if let Ok(mut border) = borders.get_mut(entity) {
-            *border = BorderColor(colors::UNSELECTED_OUTLINE);
+            *border = BorderColor::all(colors::UNSELECTED_OUTLINE);
         }
     }
     for entity in active {
         if let Ok(mut border) = borders.get_mut(entity) {
-            *border = BorderColor(colors::SELECTED_OUTLINE);
+            *border = BorderColor::all(colors::SELECTED_OUTLINE);
         }
     }
 }
@@ -219,8 +219,8 @@ pub fn mouse(
     >,
     keyboard_options: Query<(Entity, &Label), With<KeyboardOption>>,
     active: Query<(Entity, &Label), With<Active>>,
-    mut app_exit_events: EventWriter<AppExit>,
-    mut pause_event: EventWriter<PauseEvent>,
+    mut app_exit_msg: MessageWriter<AppExit>,
+    mut pause_msg: MessageWriter<PauseMsg>,
     mut next_screen: ResMut<NextState<Screen>>,
     mut next_game_screen: ResMut<NextState<GameScreen>>,
     mut vtime: ResMut<Time<Virtual>>,
@@ -232,8 +232,8 @@ pub fn mouse(
             do_action(
                 *menu_button_action,
                 &mut commands,
-                &mut app_exit_events,
-                &mut pause_event,
+                &mut app_exit_msg,
+                &mut pause_msg,
                 &mut next_screen,
                 &mut next_game_screen,
                 &active,
@@ -246,9 +246,9 @@ pub fn mouse(
     }
     for (interaction, mut border_color) in hovers.iter_mut() {
         if *interaction == Interaction::Hovered {
-            border_color.0 = colors::SELECTED_OUTLINE;
+            *border_color = BorderColor::all(colors::SELECTED_OUTLINE);
         } else if *interaction == Interaction::None {
-            border_color.0 = colors::UNSELECTED_OUTLINE;
+            *border_color = BorderColor::all(colors::UNSELECTED_OUTLINE);
         }
     }
 }
@@ -256,8 +256,8 @@ pub fn mouse(
 fn do_action(
     action: Label,
     commands: &mut Commands,
-    app_exit_events: &mut EventWriter<AppExit>,
-    pause_event: &mut EventWriter<PauseEvent>,
+    app_exit_msg: &mut MessageWriter<AppExit>,
+    pause_msg: &mut MessageWriter<PauseMsg>,
     next_screen: &mut ResMut<NextState<Screen>>,
     next_game_screen: &mut ResMut<NextState<GameScreen>>,
     active: &Query<(Entity, &Label), With<Active>>,
@@ -268,7 +268,7 @@ fn do_action(
 ) {
     match action {
         Label::Quit => {
-            app_exit_events.write(AppExit::Success);
+            app_exit_msg.write(AppExit::Success);
         }
         Label::Game => {
             next_screen.set(Screen::Game);
@@ -320,7 +320,7 @@ fn do_action(
                 .open_with_url(action.to_link().unwrap());
         }
         Label::Resume => {
-            pause_event.write(PauseEvent::TogglePause);
+            pause_msg.write(PauseMsg::TogglePause);
         }
         Label::PauseBack | Label::EndBack => {
             vtime.unpause();
@@ -366,7 +366,7 @@ pub fn pause_setup(mut commands: Commands) {
         .with_children(|cmd| {
             cmd.spawn((
                 Text::new("game is paused"),
-                TextLayout::new_with_justify(JustifyText::Center),
+                TextLayout::new_with_justify(Justify::Center),
                 FONT.clone(),
             ));
             for (action, label) in [
@@ -377,7 +377,7 @@ pub fn pause_setup(mut commands: Commands) {
                 let mut entity = cmd.spawn((
                     Button,
                     Node { ..button() },
-                    BorderColor(colors::UNSELECTED_OUTLINE),
+                    BorderColor::all(colors::UNSELECTED_OUTLINE),
                     BorderRadius::MAX,
                     action,
                 ));
@@ -410,14 +410,14 @@ pub fn end_setup(mut commands: Commands, stats: Single<&mut Stats>) {
         .with_children(|cmd| {
             cmd.spawn((
                 Text::new(format!("Game Over\nScore: {}", stats.score)),
-                TextLayout::new_with_justify(JustifyText::Center),
+                TextLayout::new_with_justify(Justify::Center),
                 FONT.clone(),
             ));
             for (action, label) in [(Label::PlayAgain, "play again"), (Label::EndBack, "exit")] {
                 let mut entity = cmd.spawn((
                     Button,
                     Node { ..button() },
-                    BorderColor(colors::UNSELECTED_OUTLINE),
+                    BorderColor::all(colors::UNSELECTED_OUTLINE),
                     BorderRadius::MAX,
                     action,
                 ));
@@ -455,7 +455,7 @@ pub fn resume_countdown_setup(mut commands: Commands) {
         BorderRadius::all(Val::Percent(100.)),
         Text::new((TIME_BEFORE_RESUME as usize).to_string()),
         FONT.clone(),
-        TextLayout::new_with_justify(JustifyText::Center),
+        TextLayout::new_with_justify(Justify::Center),
     ));
 }
 
@@ -474,7 +474,7 @@ pub fn help_setup(mut commands: Commands, config: Res<Config>) {
                 FONT.clone(),
                 TextColor(colors::TEXT_FUTURE),
                 TextLayout {
-                    justify: JustifyText::Center,
+                    justify: Justify::Center,
                     ..default()
                 }
             ));
@@ -482,7 +482,7 @@ pub fn help_setup(mut commands: Commands, config: Res<Config>) {
                 .spawn((
                     Label::HelpBack,
                     Button,
-                    BorderColor(colors::UNSELECTED_OUTLINE),
+                    BorderColor::all(colors::UNSELECTED_OUTLINE),
                     BorderRadius::MAX,
                     Node { ..button() },
                     Selected,
@@ -515,7 +515,7 @@ pub fn game_settings_setup(mut commands: Commands, config: Res<Config>) {
                 .spawn((
                     Label::GameSettingsBack,
                     Button,
-                    BorderColor(colors::UNSELECTED_OUTLINE),
+                    BorderColor::all(colors::UNSELECTED_OUTLINE),
                     BorderRadius::MAX,
                     Node { ..button() },
                 ))
@@ -598,7 +598,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                             ..button()
                         },
                         BorderRadius::MAX,
-                        BorderColor(colors::UNSELECTED_OUTLINE),
+                        BorderColor::all(colors::UNSELECTED_OUTLINE),
                     ))
                     .with_children(|row| {
                         row.spawn((
@@ -612,7 +612,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                                 Button,
                                 button_label,
                                 Node { ..button() },
-                                BorderColor(colors::UNSELECTED_OUTLINE),
+                                BorderColor::all(colors::UNSELECTED_OUTLINE),
                                 BorderRadius::MAX,
                                 KeyboardOption,
                             ));
@@ -634,7 +634,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                 .spawn((
                     Label::SettingsBack,
                     Button,
-                    BorderColor(colors::UNSELECTED_OUTLINE),
+                    BorderColor::all(colors::UNSELECTED_OUTLINE),
                     BorderRadius::MAX,
                     Node { ..button() },
                 ))
@@ -668,7 +668,7 @@ fn add_volume(par: &mut RelatedSpawnerCommands<ChildOf>, config: &Config) {
             ..button()
         },
         VolumeControl,
-        BorderColor(colors::UNSELECTED_OUTLINE),
+        BorderColor::all(colors::UNSELECTED_OUTLINE),
         BorderRadius::MAX,
         Button,
         Label::Volume,
@@ -708,7 +708,7 @@ pub fn credits_setup(mut commands: Commands) {
                 let mut ent = screen.spawn((
                     label,
                     Button,
-                    BorderColor(colors::UNSELECTED_OUTLINE),
+                    BorderColor::all(colors::UNSELECTED_OUTLINE),
                     BorderRadius::MAX,
                     Node { ..button() },
                 ));
@@ -723,7 +723,7 @@ pub fn credits_setup(mut commands: Commands) {
                 .spawn((
                     Label::CreditsBack,
                     Button,
-                    BorderColor(colors::UNSELECTED_OUTLINE),
+                    BorderColor::all(colors::UNSELECTED_OUTLINE),
                     BorderRadius::MAX,
                     Node { ..button() },
                 ))
@@ -802,8 +802,8 @@ pub fn keypress(
     selected: Single<(Entity, &Label), With<Selected>>,
     elements: Query<(Entity, &Label)>,
     keyboard_options: Query<(Entity, &Label), With<KeyboardOption>>,
-    mut app_exit_events: EventWriter<AppExit>,
-    mut pause_event: EventWriter<PauseEvent>,
+    mut app_exit_msg: MessageWriter<AppExit>,
+    mut pause_msg: MessageWriter<PauseMsg>,
     screen: Res<State<Screen>>,
     mut vtime: ResMut<Time<Virtual>>,
     mut next_screen: ResMut<NextState<Screen>>,
@@ -941,8 +941,8 @@ pub fn keypress(
         do_action(
             *selected_label,
             &mut commands,
-            &mut app_exit_events,
-            &mut pause_event,
+            &mut app_exit_msg,
+            &mut pause_msg,
             &mut next_screen,
             &mut next_game_screen,
             &active,

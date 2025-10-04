@@ -4,12 +4,12 @@
 #![allow(clippy::too_many_arguments)]
 
 mod credits;
-mod events;
 mod game;
 mod keys;
 mod menu;
+mod msg;
 use bevy::input::common_conditions::input_just_pressed;
-use bevy::{asset::RenderAssetUsages, prelude::*, render::camera::ScalingMode};
+use bevy::{asset::RenderAssetUsages, prelude::*};
 use bevy_pkv::PkvStore;
 use core::f32;
 use rand::distr::weighted::WeightedIndex;
@@ -307,7 +307,7 @@ fn main() {
             menu_plugin,
             game_plugin,
         ))
-        .add_event::<PauseEvent>()
+        .add_message::<PauseMsg>()
         .add_systems(Startup, setup)
         .init_state::<Screen>()
         .insert_resource(Config::load(&mut pkv))
@@ -332,7 +332,7 @@ fn setup(mut commands: Commands) {
     commands.spawn((
         Camera2d,
         Projection::from(OrthographicProjection {
-            scaling_mode: ScalingMode::FixedVertical {
+            scaling_mode: bevy::camera::ScalingMode::FixedVertical {
                 viewport_height: VIEWPORT_HEIGHT,
             },
             ..OrthographicProjection::default_2d()
@@ -410,8 +410,8 @@ fn game_plugin(app: &mut App) {
         )
         .insert_resource(Time::<Fixed>::from_hz(60.))
         .init_state::<GameScreen>()
-        .add_event::<GameEvent>()
-        .add_event::<AudioEvent>()
+        .add_message::<GameMsg>()
+        .add_message::<AudioMsg>()
         .add_systems(OnEnter(GameScreen::Pause), menu::pause_setup)
         .add_systems(
             OnExit(GameScreen::Pause),
@@ -470,15 +470,15 @@ fn game_plugin(app: &mut App) {
         .add_systems(
             PostUpdate,
             (
-                events::on_event,
-                events::on_audio,
-                game::reset_collisions.after(events::on_event),
-                game::despawner.after(events::on_event),
-                game::lock_enemy_text.before(TransformSystem::TransformPropagate),
+                msg::on_msg,
+                msg::on_audio,
+                game::reset_collisions.after(msg::on_msg),
+                game::despawner.after(msg::on_msg),
+                game::lock_enemy_text.before(TransformSystems::Propagate),
             )
                 .run_if(in_state(Screen::Game)),
         )
-        .add_systems(PostUpdate, events::on_toggle_pause);
+        .add_systems(PostUpdate, msg::on_toggle_pause);
 }
 
 #[macro_export]
@@ -547,8 +547,8 @@ struct MovementControls {
     h: Option<bool>,
 }
 
-#[derive(Event)]
-enum GameEvent {
+#[derive(Message)]
+enum GameMsg {
     Explosion(Vec2),
     Despawn(Entity),
     DespawnChildren(Entity),
@@ -564,8 +564,8 @@ enum GameEvent {
     GameEnd,
 }
 
-#[derive(Event)]
-enum PauseEvent {
+#[derive(Message)]
+enum PauseMsg {
     TogglePause,
 }
 
@@ -601,7 +601,7 @@ struct Spawning {
 struct Selected;
 
 #[derive(Component)]
-struct Despawn;
+struct ToDespawn;
 
 #[derive(Component)]
 struct Indicator {
@@ -645,19 +645,19 @@ struct AudioAssets {
     pub explosion: Handle<AudioSource>,
 }
 
-#[derive(Event)]
-pub enum AudioEvent {
+#[derive(Message)]
+pub enum AudioMsg {
     ProjectileLaunch,
     Explosion,
     UnmatchedKeypress,
 }
 
-impl AudioEvent {
+impl AudioMsg {
     fn sound(&self, sounds: &Res<AudioAssets>) -> Handle<AudioSource> {
         match self {
-            AudioEvent::ProjectileLaunch => sounds.projectile_launch.clone(),
-            AudioEvent::Explosion => sounds.explosion.clone(),
-            AudioEvent::UnmatchedKeypress => sounds.unmatched_keypress.clone(),
+            AudioMsg::ProjectileLaunch => sounds.projectile_launch.clone(),
+            AudioMsg::Explosion => sounds.explosion.clone(),
+            AudioMsg::UnmatchedKeypress => sounds.unmatched_keypress.clone(),
         }
     }
 }
@@ -703,6 +703,6 @@ struct ResumeCountdown {
 #[derive(Resource)]
 struct VolumeDrag(bool);
 
-fn toggle_pause(mut events: EventWriter<PauseEvent>) {
-    events.write(PauseEvent::TogglePause);
+fn toggle_pause(mut msg: MessageWriter<PauseMsg>) {
+    msg.write(PauseMsg::TogglePause);
 }

@@ -27,7 +27,7 @@ pub fn setup(
         [-PLAYER_LAUNCHER_WIDTH / 2., PLAYER_LAUNCHER_LENGTH, 0.],
         [PLAYER_LAUNCHER_WIDTH / 2., PLAYER_LAUNCHER_LENGTH, 0.],
     ];
-    let indices = bevy::render::mesh::Indices::U32(vec![0, 1, 3, 0, 2, 3]);
+    let indices = bevy::mesh::Indices::U32(vec![0, 1, 3, 0, 2, 3]);
 
     launcher_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices.to_vec());
     launcher_mesh.insert_indices(indices);
@@ -97,7 +97,7 @@ pub fn setup(
         RenderAssetUsages::default(),
     );
     indicator_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    indicator_mesh.insert_indices(bevy::render::mesh::Indices::U32(indices));
+    indicator_mesh.insert_indices(bevy::mesh::Indices::U32(indices));
 
     commands
         .spawn((
@@ -194,12 +194,12 @@ impl Shape {
 fn explosion_in_viewport(
     pos: &Vec3,
     viewport_width: f32,
-    events: &mut EventWriter<GameEvent>,
-    audio: &mut EventWriter<AudioEvent>,
+    msg: &mut MessageWriter<GameMsg>,
+    audio: &mut MessageWriter<AudioMsg>,
 ) {
     if in_viewport(&pos, viewport_width, Vec2::ZERO) {
-        events.write(GameEvent::Explosion(pos.xy()));
-        audio.write(AudioEvent::Explosion);
+        msg.write(GameMsg::Explosion(pos.xy()));
+        audio.write(AudioMsg::Explosion);
     }
 }
 
@@ -211,8 +211,8 @@ impl Enemy {
 
     pub fn collision_with_enemy(
         &mut self,
-        events: &mut EventWriter<GameEvent>,
-        audio: &mut EventWriter<AudioEvent>,
+        msg: &mut MessageWriter<GameMsg>,
+        audio: &mut MessageWriter<AudioMsg>,
         entity: Entity,
         pos: &Vec3,
         normal: Vec2,
@@ -223,17 +223,17 @@ impl Enemy {
             self.shape = shape;
             self.keys = remove_last(&self.keys);
             if self.keys.is_empty() {
-                explosion_in_viewport(pos, viewport_width, events, audio);
-                events.write(GameEvent::Despawn(entity));
+                explosion_in_viewport(pos, viewport_width, msg, audio);
+                msg.write(GameMsg::Despawn(entity));
             } else {
                 self.add_collision(normal);
-                events.write(GameEvent::ReplaceShape(entity, shape));
-                events.write(GameEvent::DespawnChildren(entity));
-                events.write(GameEvent::AddText(entity));
+                msg.write(GameMsg::ReplaceShape(entity, shape));
+                msg.write(GameMsg::DespawnChildren(entity));
+                msg.write(GameMsg::AddText(entity));
             }
         } else {
-            explosion_in_viewport(pos, viewport_width, events, audio);
-            events.write(GameEvent::Despawn(entity));
+            explosion_in_viewport(pos, viewport_width, msg, audio);
+            msg.write(GameMsg::Despawn(entity));
         }
     }
 
@@ -280,9 +280,9 @@ impl Stats {
 }
 
 pub fn keypress(
-    mut events: EventWriter<GameEvent>,
-    mut audio: EventWriter<AudioEvent>,
-    mut evr_kbd: EventReader<KeyboardInput>,
+    mut msg: MessageWriter<GameMsg>,
+    mut audio: MessageWriter<AudioMsg>,
+    mut evr_kbd: MessageReader<KeyboardInput>,
     player: Single<(&mut Player, &Transform), (With<Player>, Without<Launcher>)>,
     launcher: Single<&mut Transform, (With<Launcher>, Without<Player>)>,
     indicator: Single<Entity, (With<Indicator>, Without<Player>)>,
@@ -312,9 +312,9 @@ pub fn keypress(
         }
         match &ev.logical_key {
             Key::Backspace | Key::Space => {
-                events.write(GameEvent::Invisible(*indicator));
+                msg.write(GameMsg::Invisible(*indicator));
                 if let Some(selected) = player.selected {
-                    events.write(GameEvent::DeSelect(selected));
+                    msg.write(GameMsg::DeSelect(selected));
                 }
                 player.selected = None;
             }
@@ -332,29 +332,29 @@ pub fn keypress(
                                 selected_enemy.keys.chars().nth(selected_enemy.next_index)
                             {
                                 if key == to_press {
-                                    events.write(GameEvent::Projectile(
+                                    msg.write(GameMsg::Projectile(
                                         selected_entity,
                                         projectile_spawn_location(
                                             player_transform,
                                             &launcher_transform,
                                         ),
                                     ));
-                                    audio.write(AudioEvent::ProjectileLaunch);
+                                    audio.write(AudioMsg::ProjectileLaunch);
                                     if selected_enemy
                                         .keys
                                         .len()
                                         .saturating_sub(selected_enemy.next_index)
                                         == 1
                                     {
-                                        events.write(GameEvent::Invisible(*indicator));
-                                        events.write(GameEvent::DeSelect(selected));
+                                        msg.write(GameMsg::Invisible(*indicator));
+                                        msg.write(GameMsg::DeSelect(selected));
                                         player.selected = None;
                                     }
                                     selected_enemy.next_index += 1;
-                                    events.write(GameEvent::DespawnChildren(selected_entity));
-                                    events.write(GameEvent::AddText(selected_entity));
+                                    msg.write(GameMsg::DespawnChildren(selected_entity));
+                                    msg.write(GameMsg::AddText(selected_entity));
                                 } else {
-                                    audio.write(AudioEvent::UnmatchedKeypress);
+                                    audio.write(AudioMsg::UnmatchedKeypress);
                                 }
                             }
                         }
@@ -394,7 +394,7 @@ pub fn keypress(
                             let mut ce = closest_enemy.unwrap();
                             if ce.keys.len().saturating_sub(ce.next_index) > 1 {
                                 player.selected = closest_entity;
-                                events.write(GameEvent::Select(e));
+                                msg.write(GameMsg::Select(e));
                             } else {
                                 point_launcher(
                                     player_transform,
@@ -404,18 +404,18 @@ pub fn keypress(
                             }
 
                             ce.next_index += 1;
-                            events.write(GameEvent::DespawnChildren(e));
-                            events.write(GameEvent::AddText(e));
-                            events.write(GameEvent::Projectile(
+                            msg.write(GameMsg::DespawnChildren(e));
+                            msg.write(GameMsg::AddText(e));
+                            msg.write(GameMsg::Projectile(
                                 e,
                                 projectile_spawn_location(player_transform, &launcher_transform),
                             ));
-                            audio.write(AudioEvent::ProjectileLaunch);
+                            audio.write(AudioMsg::ProjectileLaunch);
                         } else {
-                            audio.write(AudioEvent::UnmatchedKeypress);
+                            audio.write(AudioMsg::UnmatchedKeypress);
                         }
                         if player.selected.is_none() {
-                            events.write(GameEvent::Invisible(*indicator));
+                            msg.write(GameMsg::Invisible(*indicator));
                         }
                     }
                 }
@@ -503,7 +503,7 @@ pub fn player_movement(
 pub fn spawning_enemy(
     time: Res<Time<Virtual>>,
     mut query: Query<(Entity, &mut Enemy, &mut Spawning, &mut Transform)>,
-    mut events: EventWriter<GameEvent>,
+    mut msg: MessageWriter<GameMsg>,
     window: Single<&Window>,
 ) {
     let dt = time.delta_secs();
@@ -514,7 +514,7 @@ pub fn spawning_enemy(
 
         if spawn.time >= SPAWNER_ENEMY_SPAWN_DELAY {
             if let Shape::Pentagon = enemy.shape {
-                events.write(GameEvent::SpawnEnemy(
+                msg.write(GameMsg::SpawnEnemy(
                     Shape::Triangle,
                     transform.translation.xy(),
                     Some(ent),
@@ -629,8 +629,8 @@ fn move_and_rotate_towards(
 
 pub fn projectile_movement(
     mut projectiles_query: Query<(Entity, &mut Projectile, &mut Transform), With<Projectile>>,
-    mut events: EventWriter<GameEvent>,
-    mut audio: EventWriter<AudioEvent>,
+    mut msg: MessageWriter<GameMsg>,
+    mut audio: MessageWriter<AudioMsg>,
     mut enemies_query: Query<(Entity, &mut Enemy, &Transform), (Without<Projectile>,)>,
     stats: Single<(&mut Stats, &mut Text)>,
     time: Res<Time<Virtual>>,
@@ -655,23 +655,23 @@ pub fn projectile_movement(
             )
             .is_some()
             {
-                events.write(GameEvent::Despawn(projectile_entity));
+                msg.write(GameMsg::Despawn(projectile_entity));
                 if targeted_enemy.keys.len() <= 1 {
-                    events.write(GameEvent::Explosion(target_transform.translation.xy()));
-                    audio.write(AudioEvent::Explosion);
-                    events.write(GameEvent::Despawn(target_entity));
+                    msg.write(GameMsg::Explosion(target_transform.translation.xy()));
+                    audio.write(AudioMsg::Explosion);
+                    msg.write(GameMsg::Despawn(target_entity));
 
                     stats.alter_score(targeted_enemy.num_points() as isize);
                     score_change = true;
                 } else {
-                    events.write(GameEvent::DespawnChildren(target_entity));
+                    msg.write(GameMsg::DespawnChildren(target_entity));
                     targeted_enemy.next_index -= 1;
                     targeted_enemy.keys.remove(0);
-                    events.write(GameEvent::AddText(target_entity));
+                    msg.write(GameMsg::AddText(target_entity));
                 }
             }
         } else {
-            events.write(GameEvent::Despawn(projectile_entity));
+            msg.write(GameMsg::Despawn(projectile_entity));
         }
     }
     if score_change {
@@ -838,8 +838,8 @@ pub fn update_spawned_relations(
 }
 
 pub fn enemy_collisions(
-    mut events: EventWriter<GameEvent>,
-    mut audio: EventWriter<AudioEvent>,
+    mut msg: MessageWriter<GameMsg>,
+    mut audio: MessageWriter<AudioMsg>,
     mut query: Query<(Entity, &mut Enemy, &Transform)>,
     stats: Single<(&mut Stats, &mut Text)>,
     window: Single<&Window>,
@@ -863,7 +863,7 @@ pub fn enemy_collisions(
             if let Some((normal, a_to_b)) = collide(points_a, points_b, None) {
                 if !enemy_a.colliding {
                     enemy_a.collision_with_enemy(
-                        &mut events,
+                        &mut msg,
                         &mut audio,
                         entity_a,
                         &transform_a.translation,
@@ -873,7 +873,7 @@ pub fn enemy_collisions(
                 }
                 if !enemy_b.colliding {
                     enemy_b.collision_with_enemy(
-                        &mut events,
+                        &mut msg,
                         &mut audio,
                         entity_b,
                         &transform_b.translation,
@@ -899,7 +899,7 @@ pub fn explosion_system(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut query: Query<(Entity, &mut Transform, &mut ExplosionParticle)>,
     time: Res<Time<Virtual>>,
-    mut events: EventWriter<GameEvent>,
+    mut msg: MessageWriter<GameMsg>,
 ) {
     let dt = time.delta_secs();
 
@@ -914,7 +914,7 @@ pub fn explosion_system(
         transform.translation.x += particle.velocity.x * dt;
         transform.translation.y += particle.velocity.y * dt;
         if particle.lifetime <= 0. {
-            events.write(GameEvent::Despawn(entity));
+            msg.write(GameMsg::Despawn(entity));
         }
     }
 }
@@ -922,8 +922,8 @@ pub fn explosion_system(
 pub fn player_collisions(
     mut enemies: Query<(&mut Enemy, &Transform), Without<Player>>,
     mut obstacles: Query<&Transform, (With<Obstacle>, Without<Player>)>,
-    mut events: EventWriter<GameEvent>,
-    mut audio: EventWriter<AudioEvent>,
+    mut msg: MessageWriter<GameMsg>,
+    mut audio: MessageWriter<AudioMsg>,
     player: Single<(Entity, &Transform), With<Player>>,
     mut stats: Single<&mut Stats>,
 ) {
@@ -956,10 +956,10 @@ pub fn player_collisions(
 
     if hit && !PLAYER_IMMUNE {
         if stats.running {
-            events.write(GameEvent::Explosion(player_transform.translation.xy()));
-            audio.write(AudioEvent::Explosion);
-            events.write(GameEvent::Invisible(player_entity));
-            events.write(GameEvent::GameEnd);
+            msg.write(GameMsg::Explosion(player_transform.translation.xy()));
+            audio.write(AudioMsg::Explosion);
+            msg.write(GameMsg::Invisible(player_entity));
+            msg.write(GameMsg::GameEnd);
         }
         stats.running = false;
     }
@@ -967,7 +967,7 @@ pub fn player_collisions(
 
 pub fn spawn_enemies(
     time: Res<Time<Fixed>>,
-    mut events: EventWriter<GameEvent>,
+    mut msg: MessageWriter<GameMsg>,
     mut spawner: ResMut<Spawner>,
     window: Single<&Window>,
 ) {
@@ -988,7 +988,7 @@ pub fn spawn_enemies(
             *count = if i == shape.id() { 0 } else { *count + 1 };
         }
 
-        events.write(GameEvent::SpawnEnemy(*shape, Vec2::new(x, y), None));
+        msg.write(GameMsg::SpawnEnemy(*shape, Vec2::new(x, y), None));
 
         spawner.enemy_delay_lower =
             (spawner.enemy_delay_lower * SPAWN_DELAY_DECAY_RATE).max(SPAWN_ENEMY_DELAY_MIN_LOWER);
@@ -1001,7 +1001,7 @@ pub fn spawn_enemies(
 
 pub fn spawn_obstacles(
     time: Res<Time<Fixed>>,
-    mut events: EventWriter<GameEvent>,
+    mut msg: MessageWriter<GameMsg>,
     mut spawner: ResMut<Spawner>,
     window: Single<&Window>,
     player_transform: Single<&Transform, With<Player>>,
@@ -1016,7 +1016,7 @@ pub fn spawn_obstacles(
         let x = width * 0.5 * SPAWN_LOCATION_MULTIPLIER * angle.cos();
         let y = VIEWPORT_HEIGHT * 0.5 * SPAWN_LOCATION_MULTIPLIER * angle.sin();
         let pos = Vec2::new(x, y);
-        events.write(GameEvent::SpawnObstacle(
+        msg.write(GameMsg::SpawnObstacle(
             pos,
             (player_transform.translation.xy() - pos).normalize(),
         ));
@@ -1076,7 +1076,7 @@ pub fn track_selected_enemy(
             Without<Player>,
         ),
     >,
-    mut events: EventWriter<GameEvent>,
+    mut msg: MessageWriter<GameMsg>,
 ) {
     let (indicator_entity, mut indicator, mut indicator_transform) = indicator.into_inner();
     let mut launcher_transform = launcher.into_inner();
@@ -1090,11 +1090,11 @@ pub fn track_selected_enemy(
 
         indicator_transform.translation = selected_transform.translation;
         if !indicator.tracking {
-            events.write(GameEvent::Visible(indicator_entity));
+            msg.write(GameMsg::Visible(indicator_entity));
             indicator.tracking = true;
         }
     } else if indicator.tracking {
-        events.write(GameEvent::Invisible(indicator_entity));
+        msg.write(GameMsg::Invisible(indicator_entity));
         indicator.tracking = false;
     }
 }
@@ -1102,8 +1102,8 @@ pub fn track_selected_enemy(
 pub fn obstacle_collisions(
     mut enemies: Query<(Entity, &mut Enemy, &Transform), Without<Obstacle>>,
     mut obstacles: Query<(&mut Obstacle, &Transform), Without<Enemy>>,
-    mut events: EventWriter<GameEvent>,
-    mut audio: EventWriter<AudioEvent>,
+    mut msg: MessageWriter<GameMsg>,
+    mut audio: MessageWriter<AudioMsg>,
     window: Single<&Window>,
 ) {
     let viewport_width = viewport_width(&window);
@@ -1118,7 +1118,7 @@ pub fn obstacle_collisions(
                     e_points,
                 ) {
                     e.collision_with_enemy(
-                        &mut events,
+                        &mut msg,
                         &mut audio,
                         e_ent,
                         &e_transform.translation,
@@ -1161,7 +1161,7 @@ fn point_launcher(
 
 pub fn obstacle(
     mut obstacles: Query<(Entity, &mut Obstacle, &mut Transform)>,
-    mut events: EventWriter<GameEvent>,
+    mut msg: MessageWriter<GameMsg>,
     time: Res<Time<Virtual>>,
     window: Single<&Window>,
 ) {
@@ -1176,20 +1176,20 @@ pub fn obstacle(
         transform.translation +=
             o.direction.extend(OBSTACLE_Z_INDEX) * OBSTACLE_MOVEMENT_SPEED * dt;
         if o.entered_viewport && !in_viewport {
-            events.write(GameEvent::Despawn(ent));
+            msg.write(GameMsg::Despawn(ent));
         } else {
             o.entered_viewport = in_viewport;
             if !o.entered_viewport {
                 o.time_to_enter_viewport -= dt;
                 if o.time_to_enter_viewport <= 0. {
-                    events.write(GameEvent::Despawn(ent));
+                    msg.write(GameMsg::Despawn(ent));
                 }
             }
         }
     }
 }
 
-pub fn despawner(mut commands: Commands, despawn: Query<(Entity, &Despawn)>) {
+pub fn despawner(mut commands: Commands, despawn: Query<(Entity, &ToDespawn)>) {
     for (e, _) in despawn {
         commands.entity(e).despawn();
     }
