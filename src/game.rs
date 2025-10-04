@@ -543,7 +543,9 @@ pub fn spawning_enemy(
                 transform.translation.y += movement.y;
 
                 let angle = movement.y.atan2(movement.x);
-                transform.rotation = Quat::from_rotation_z(angle);
+                transform.rotation = transform
+                    .rotation
+                    .rotate_towards(Quat::from_rotation_z(angle), dt);
             }
         } else {
             move_and_rotate_towards(
