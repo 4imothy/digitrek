@@ -63,13 +63,13 @@ pub fn on_msg(
             }
             GameMsg::AddText(entity) => {
                 let mut cmd = commands.entity(*entity);
-                if let Ok(enemy) = enemies.get(*entity) {
-                    if !enemy.keys.is_empty() {
-                        add_text(&mut cmd, &enemy.keys, enemy.next_index);
-                    }
+                if let Ok(enemy) = enemies.get(*entity)
+                    && !enemy.keys.is_empty()
+                {
+                    add_text(&mut cmd, &enemy.keys, enemy.next_index);
                 }
             }
-            GameMsg::SpawnEnemy(shape, pos, spawned_by) => {
+            GameMsg::SpawnEnemy(shape, pos, spawned_by, rot) => {
                 spawn_enemy(
                     &mut rng,
                     &mut commands,
@@ -77,6 +77,7 @@ pub fn on_msg(
                     &mut materials,
                     *shape,
                     *pos,
+                    *rot,
                     *spawned_by,
                     &config,
                 );
@@ -204,6 +205,7 @@ fn spawn_enemy(
     materials: &mut ResMut<Assets<ColorMaterial>>,
     shape: Shape,
     pos: Vec2,
+    rot: Option<f32>,
     spawned_by: Option<Entity>,
     config: &Config,
 ) {
@@ -224,13 +226,15 @@ fn spawn_enemy(
         .collect::<String>();
     let mut ent_cmds = commands.spawn((
         Mesh2d(mesh),
-        Transform::from_translation(pos.extend(
-            if matches!(shape, Shape::Triangle | Shape::Rhombus) {
+        Transform {
+            translation: pos.extend(if matches!(shape, Shape::Triangle | Shape::Rhombus) {
                 TRACKING_Z_INDEX
             } else {
                 SPAWNER_Z_INDEX
-            },
-        )),
+            }),
+            rotation: rot.map(|r| Quat::from_rotation_z(r)).unwrap_or_default(),
+            ..default()
+        },
         MeshMaterial2d(materials.add(color)),
     ));
     match shape {

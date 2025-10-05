@@ -560,7 +560,7 @@ enum GameMsg {
     DespawnChildren(Entity),
     ReplaceShape(Entity, Shape),
     AddText(Entity),
-    SpawnEnemy(Shape, Vec2, Option<Entity>),
+    SpawnEnemy(Shape, Vec2, Option<Entity>, Option<f32>),
     SpawnObstacle(Vec2, Vec2),
     Invisible(Entity),
     Visible(Entity),

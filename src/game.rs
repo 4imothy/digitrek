@@ -200,7 +200,7 @@ fn explosion_in_viewport(
     msg: &mut MessageWriter<GameMsg>,
     audio: &mut MessageWriter<AudioMsg>,
 ) {
-    if in_viewport(&pos, viewport_width, Vec2::ZERO) {
+    if in_viewport(pos, viewport_width, Vec2::ZERO) {
         msg.write(GameMsg::Explosion(pos.xy()));
         audio.write(AudioMsg::Explosion);
     }
@@ -326,39 +326,38 @@ pub fn keypress(
                     if !config.keypool().contains(&key) {
                         continue;
                     }
-                    if let Some(selected) = player.selected {
-                        if let Ok((selected_entity, mut selected_enemy, _)) =
+                    if let Some(selected) = player.selected
+                        && let Ok((selected_entity, mut selected_enemy, _)) =
                             enemy_query.get_mut(selected)
+                    {
+                        found_selected = true;
+                        if let Some(to_press) =
+                            selected_enemy.keys.chars().nth(selected_enemy.next_index)
                         {
-                            found_selected = true;
-                            if let Some(to_press) =
-                                selected_enemy.keys.chars().nth(selected_enemy.next_index)
-                            {
-                                if key == to_press {
-                                    msg.write(GameMsg::Projectile(
-                                        selected_entity,
-                                        projectile_spawn_location(
-                                            player_transform,
-                                            &launcher_transform,
-                                        ),
-                                    ));
-                                    audio.write(AudioMsg::ProjectileLaunch);
-                                    if selected_enemy
-                                        .keys
-                                        .len()
-                                        .saturating_sub(selected_enemy.next_index)
-                                        == 1
-                                    {
-                                        msg.write(GameMsg::Invisible(*indicator));
-                                        msg.write(GameMsg::DeSelect(selected));
-                                        player.selected = None;
-                                    }
-                                    selected_enemy.next_index += 1;
-                                    msg.write(GameMsg::DespawnChildren(selected_entity));
-                                    msg.write(GameMsg::AddText(selected_entity));
-                                } else {
-                                    audio.write(AudioMsg::UnmatchedKeypress);
+                            if key == to_press {
+                                msg.write(GameMsg::Projectile(
+                                    selected_entity,
+                                    projectile_spawn_location(
+                                        player_transform,
+                                        &launcher_transform,
+                                    ),
+                                ));
+                                audio.write(AudioMsg::ProjectileLaunch);
+                                if selected_enemy
+                                    .keys
+                                    .len()
+                                    .saturating_sub(selected_enemy.next_index)
+                                    == 1
+                                {
+                                    msg.write(GameMsg::Invisible(*indicator));
+                                    msg.write(GameMsg::DeSelect(selected));
+                                    player.selected = None;
                                 }
+                                selected_enemy.next_index += 1;
+                                msg.write(GameMsg::DespawnChildren(selected_entity));
+                                msg.write(GameMsg::AddText(selected_entity));
+                            } else {
+                                audio.write(AudioMsg::UnmatchedKeypress);
                             }
                         }
                     }
@@ -376,19 +375,17 @@ pub fn keypress(
                                     viewport_width,
                                     Vec2::ZERO,
                                 )
+                                && let Some(enemy_key) = enemy.keys.chars().next()
+                                && enemy_key == key
                             {
-                                if let Some(enemy_key) = enemy.keys.chars().next() {
-                                    if enemy_key == key {
-                                        let distance = player_transform
-                                            .translation
-                                            .distance(enemy_transform.translation);
-                                        if distance < closest_distance {
-                                            closest_distance = distance;
-                                            closest_entity = Some(entity);
-                                            closest_enemy = Some(enemy);
-                                            closest_enemy_transform = Some(enemy_transform);
-                                        }
-                                    }
+                                let distance = player_transform
+                                    .translation
+                                    .distance(enemy_transform.translation);
+                                if distance < closest_distance {
+                                    closest_distance = distance;
+                                    closest_entity = Some(entity);
+                                    closest_enemy = Some(enemy);
+                                    closest_enemy_transform = Some(enemy_transform);
                                 }
                             }
                         }
@@ -501,6 +498,7 @@ pub fn spawning_enemy(
     time: Res<Time<Virtual>>,
     mut query: Query<(Entity, &mut Enemy, &mut Spawning, &mut Transform)>,
     mut msg: MessageWriter<GameMsg>,
+    player: Single<&Transform, (With<Player>, Without<Enemy>)>,
     window: Single<&Window>,
 ) {
     let dt = time.delta_secs();
@@ -511,10 +509,14 @@ pub fn spawning_enemy(
 
         if spawn.time >= SPAWNER_ENEMY_SPAWN_DELAY {
             if let Shape::Pentagon = enemy.shape {
+                let direction = player.translation - transform.translation;
+                let angle = direction.y.atan2(direction.x) - std::f32::consts::FRAC_PI_2;
+
                 msg.write(GameMsg::SpawnEnemy(
                     Shape::Triangle,
                     transform.translation.xy(),
                     Some(ent),
+                    Some(angle),
                 ));
             }
             spawn.time = 0.;
@@ -856,35 +858,36 @@ pub fn enemy_collisions(
         let points_a: &[Vec3] = points!(enemy_a.shape, transform_a);
         let points_b: &[Vec3] = points!(enemy_b.shape, transform_b);
 
-        if enemy_a.spawned_by.is_none() && enemy_b.spawned_by.is_none() {
-            if let Some((normal, a_to_b)) = collide(points_a, points_b, None) {
-                if !enemy_a.colliding {
-                    enemy_a.collision_with_enemy(
-                        &mut msg,
-                        &mut audio,
-                        entity_a,
-                        &transform_a.translation,
-                        if a_to_b { -normal } else { normal },
-                        viewport_width,
-                    );
-                }
-                if !enemy_b.colliding {
-                    enemy_b.collision_with_enemy(
-                        &mut msg,
-                        &mut audio,
-                        entity_b,
-                        &transform_b.translation,
-                        if a_to_b { normal } else { -normal },
-                        viewport_width,
-                    );
-                }
-                if in_viewport(&transform_a.translation, viewport_width, Vec2::ZERO)
-                    && in_viewport(&transform_b.translation, viewport_width, Vec2::ZERO)
-                {
-                    stats.alter_score(1);
-                }
-                score_change = true;
+        if enemy_a.spawned_by.is_none()
+            && enemy_b.spawned_by.is_none()
+            && let Some((normal, a_to_b)) = collide(points_a, points_b, None)
+        {
+            if !enemy_a.colliding {
+                enemy_a.collision_with_enemy(
+                    &mut msg,
+                    &mut audio,
+                    entity_a,
+                    &transform_a.translation,
+                    if a_to_b { -normal } else { normal },
+                    viewport_width,
+                );
             }
+            if !enemy_b.colliding {
+                enemy_b.collision_with_enemy(
+                    &mut msg,
+                    &mut audio,
+                    entity_b,
+                    &transform_b.translation,
+                    if a_to_b { normal } else { -normal },
+                    viewport_width,
+                );
+            }
+            if in_viewport(&transform_a.translation, viewport_width, Vec2::ZERO)
+                && in_viewport(&transform_b.translation, viewport_width, Vec2::ZERO)
+            {
+                stats.alter_score(1);
+            }
+            score_change = true;
         }
     }
     if score_change {
@@ -990,7 +993,7 @@ pub fn spawn_enemies(
             *count = if i == shape.id() { 0 } else { *count + 1 };
         }
 
-        msg.write(GameMsg::SpawnEnemy(*shape, Vec2::new(x, y), None));
+        msg.write(GameMsg::SpawnEnemy(*shape, Vec2::new(x, y), None, None));
 
         spawner.enemy_delay_mu = (INITIAL_ENEMY_SPAWN_DELAY_MU
             * f32::exp(-1. * *ENEMY_SPAWN_DECAY_RATE * clock.0))
@@ -1116,21 +1119,21 @@ pub fn obstacle_collisions(
     for (_, o_transform) in obstacles.iter_mut() {
         for (e_ent, mut e, e_transform) in enemies.iter_mut() {
             let e_points: &[Vec3] = points!(e.shape, e_transform);
-            if !e.colliding {
-                if let Some(normal) = circle_polygon_collide(
+            if !e.colliding
+                && let Some(normal) = circle_polygon_collide(
                     o_transform.translation.truncate(),
                     OBSTACLE_RADIUS,
                     e_points,
-                ) {
-                    e.collision_with_enemy(
-                        &mut msg,
-                        &mut audio,
-                        e_ent,
-                        &e_transform.translation,
-                        -normal,
-                        viewport_width,
-                    );
-                }
+                )
+            {
+                e.collision_with_enemy(
+                    &mut msg,
+                    &mut audio,
+                    e_ent,
+                    &e_transform.translation,
+                    -normal,
+                    viewport_width,
+                );
             }
         }
     }

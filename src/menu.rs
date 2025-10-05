@@ -926,16 +926,15 @@ pub fn keypress(
         (Label::GameSettingsBack, -1) => Some(Label::Volume),
         _ => None,
     };
-    if let Some(a) = next_selection {
-        if let Some((next, _)) = elements
+    if let Some(a) = next_selection
+        && let Some((next, _)) = elements
             .iter()
             .find(|(_, button_action)| **button_action == a)
-        {
-            if let Ok(mut ent) = commands.get_entity(selected_ent) {
-                ent.remove::<Selected>();
-            }
-            commands.entity(next).insert(Selected);
+    {
+        if let Ok(mut ent) = commands.get_entity(selected_ent) {
+            ent.remove::<Selected>();
         }
+        commands.entity(next).insert(Selected);
     }
     if keys.just_pressed(KeyCode::Enter) {
         do_action(
