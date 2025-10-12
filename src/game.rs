@@ -504,6 +504,7 @@ pub fn spawning_enemy(
 ) {
     let dt = time.delta_secs();
     let viewport_width = viewport_width(&window);
+    let padding_fator = rand::rng().random_range(4.0..5.0);
 
     for (ent, mut enemy, mut spawn, mut transform) in &mut query {
         spawn.time += dt;
@@ -530,7 +531,10 @@ pub fn spawning_enemy(
             || in_viewport(
                 &pos,
                 viewport_width,
-                Vec2::splat(PLAYER_RADIUS * rand::rng().random_range(4.0..5.0)),
+                Vec2::new(
+                    PLAYER_RADIUS * viewport_width / VIEWPORT_HEIGHT * padding_fator,
+                    PLAYER_RADIUS * VIEWPORT_HEIGHT / viewport_width * padding_fator,
+                ),
             )
         {
             spawn.entered_view = true;

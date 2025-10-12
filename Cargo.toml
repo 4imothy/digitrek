@@ -20,3 +20,4 @@ getrandom = { version = "0.3.3", features = ["wasm_js"] }
 player_immune = []
 show_local_points = []
 one_key = []
+spawn_functions = []

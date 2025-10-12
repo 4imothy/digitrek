@@ -20,28 +20,29 @@ use std::sync::LazyLock;
 const SHOW_LOCAL_POINTS: bool = cfg!(feature = "show_local_points");
 const PLAYER_IMMUNE: bool = cfg!(feature = "player_immune");
 const ONE_KEY: bool = cfg!(feature = "one_key");
+const SPAWN_FUNCTIONS: bool = cfg!(feature = "spawn_functions");
 
 const PLAYER_MOVEMENT_SPEED: f32 = 400.;
 const PLAYER_ROTATION_SPEED: f32 = 4.;
-const TRIANGLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 3.;
+const TRIANGLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 4.;
 const TRIANGLE_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 6.;
-const RHOMBUS_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 4.;
+const RHOMBUS_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 6.;
 const RHOMBUS_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 8.;
-const PENTAGON_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 6.;
+const PENTAGON_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 8.;
 const PENTAGON_ROTATION_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 6.;
 const PROJECTILE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED * 4.;
-const OBSTACLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 2.;
+const OBSTACLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 3.;
 const OBSTACLE_FIELD_TIME_TO_ENTER_VIEWPORT: f32 = 5.;
 
 const FIRST_ENEMY_SPAWN_DELAY: f32 = 0.;
 const FIRST_OBSTACLE_SPAWN_DELAY: f32 = 2.;
 const INITIAL_ENEMY_SPAWN_DELAY_MU: f32 = 4.;
 const INITIAL_OBSTACLE_SPAWN_DELAY_MU: f32 = 8.;
-const ENEMY_SPAWN_DELAY_MIN_MU: f32 = 1.0;
+const ENEMY_SPAWN_DELAY_MIN_MU: f32 = 0.7;
 const OBSTACLE_SPAWN_DELAY_MIN_MU: f32 = 4.;
 const SPAWN_DELTA: f32 = 0.3;
-const SPAWNER_ENEMY_SPAWN_DELAY: f32 = 3.;
-const TIME_TO_MAX_DIF: f32 = 70.;
+const SPAWNER_ENEMY_SPAWN_DELAY: f32 = 5.;
+const TIME_TO_MAX_DIF: f32 = 40.;
 
 static ENEMY_SPAWN_DECAY_RATE: LazyLock<f32> = LazyLock::new(|| {
     (ENEMY_SPAWN_DELAY_MIN_MU / INITIAL_ENEMY_SPAWN_DELAY_MU).ln() / -TIME_TO_MAX_DIF
@@ -298,26 +299,39 @@ enum KeyboardLayouts {
 }
 
 fn main() {
-    let mut pkv = PkvStore::new("timware", env!("CARGO_PKG_NAME"));
-    App::new()
-        .add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: env!("CARGO_PKG_NAME").to_string(),
+    if SPAWN_FUNCTIONS {
+        println!(
+            "enemy:
+y = {INITIAL_ENEMY_SPAWN_DELAY_MU} * exp(-{} * x)
+y = {ENEMY_SPAWN_DELAY_MIN_MU}
+
+obstacle:
+y = {INITIAL_OBSTACLE_SPAWN_DELAY_MU} * exp(-{} * x)
+y = {OBSTACLE_SPAWN_DELAY_MIN_MU}",
+            *ENEMY_SPAWN_DECAY_RATE, *OBSTACLE_SPAWN_DECAY_RATE,
+        );
+    } else {
+        let mut pkv = PkvStore::new("timware", env!("CARGO_PKG_NAME"));
+        App::new()
+            .add_plugins((
+                DefaultPlugins.set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: env!("CARGO_PKG_NAME").to_string(),
+                        ..default()
+                    }),
                     ..default()
                 }),
-                ..default()
-            }),
-            menu_plugin,
-            game_plugin,
-        ))
-        .add_message::<PauseMsg>()
-        .add_systems(Startup, setup)
-        .init_state::<Screen>()
-        .insert_resource(Config::load(&mut pkv))
-        .insert_resource(ClearColor(colors::BACKGROUND))
-        .insert_resource(pkv)
-        .run();
+                menu_plugin,
+                game_plugin,
+            ))
+            .add_message::<PauseMsg>()
+            .add_systems(Startup, setup)
+            .init_state::<Screen>()
+            .insert_resource(Config::load(&mut pkv))
+            .insert_resource(ClearColor(colors::BACKGROUND))
+            .insert_resource(pkv)
+            .run();
+    }
 }
 
 fn load_or_set<T: serde::de::DeserializeOwned + serde::Serialize>(
