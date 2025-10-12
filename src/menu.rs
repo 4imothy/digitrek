@@ -465,18 +465,21 @@ pub fn help_setup(mut commands: Commands, config: Res<Config>) {
         .with_children(|screen| {
             screen.spawn((
                 Text::new(format!(
-                    "avoid polygons and circles\nuse {}{}{}{} to move\nuse the right side of the keyboard to defeat polygons",
-                    config.up_char(),
-                    config.left_char(),
-                    config.down_char(),
-                    config.right_char()
+                    "avoid polygons and circles\n\
+                     use {up}{left}{down}{right} to move\n\
+                     use the right side of the keyboard to defeat polygons\n\
+                     press space or backspace to stop targeting a polygon",
+                    up = config.up_char(),
+                    left = config.left_char(),
+                    down = config.down_char(),
+                    right = config.right_char(),
                 )),
                 FONT.clone(),
                 TextColor(colors::TEXT_FUTURE),
                 TextLayout {
                     justify: Justify::Center,
                     ..default()
-                }
+                },
             ));
             screen
                 .spawn((
@@ -488,7 +491,11 @@ pub fn help_setup(mut commands: Commands, config: Res<Config>) {
                     Selected,
                 ))
                 .with_children(|button| {
-                    button.spawn((Text::new("back"), FONT.clone(), TextColor(colors::TEXT_NEXT)));
+                    button.spawn((
+                        Text::new("back"),
+                        FONT.clone(),
+                        TextColor(colors::TEXT_NEXT),
+                    ));
                 });
         });
 }

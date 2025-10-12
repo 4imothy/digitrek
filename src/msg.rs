@@ -232,7 +232,7 @@ fn spawn_enemy(
             } else {
                 SPAWNER_Z_INDEX
             }),
-            rotation: rot.map(|r| Quat::from_rotation_z(r)).unwrap_or_default(),
+            rotation: rot.map(Quat::from_rotation_z).unwrap_or_default(),
             ..default()
         },
         MeshMaterial2d(materials.add(color)),
