@@ -300,6 +300,7 @@ pub fn keypress(
 ) {
     let (mut player, player_transform) = player.into_inner();
     if !stats.running {
+        evr_kbd.clear();
         return;
     }
     let viewport_width = viewport_width(&window);
