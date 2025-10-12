@@ -45,6 +45,7 @@ pub enum Label {
     LaunchProjectileSound,
     ExplosionSound,
     MistypeSound,
+    Source,
     Help,
     HelpBack,
     Resume,
@@ -73,6 +74,7 @@ impl Label {
             Label::LaunchProjectileSound => Some(credits::LAUNCH_PROJECTILE_SOUND_LINK),
             Label::ExplosionSound => Some(credits::EXPLOSION_SOUND_LINK),
             Label::MistypeSound => Some(credits::MISTYPE_SOUND_LINK),
+            Label::Source => Some(credits::SOURCE_LINK),
             _ => None,
         }
     }
@@ -310,7 +312,8 @@ fn do_action(
         | Label::GameEngine
         | Label::LaunchProjectileSound
         | Label::ExplosionSound
-        | Label::MistypeSound => {
+        | Label::MistypeSound
+        | Label::Source => {
             #[cfg(not(target_arch = "wasm32"))]
             let _ = open::that(action.to_link().unwrap());
 
@@ -711,6 +714,7 @@ pub fn credits_setup(mut commands: Commands) {
                 ),
                 (Label::ExplosionSound, credits::EXPLOSION_SOUND_TEXT),
                 (Label::MistypeSound, credits::MISTYPE_SOUND_TEXT),
+                (Label::Source, credits::SOURCE_TEXT),
             ] {
                 let mut ent = screen.spawn((
                     label,
@@ -921,9 +925,11 @@ pub fn keypress(
         (Label::LaunchProjectileSound, -1) => Some(Label::GameEngine),
         (Label::ExplosionSound, 1) => Some(Label::MistypeSound),
         (Label::ExplosionSound, -1) => Some(Label::LaunchProjectileSound),
-        (Label::MistypeSound, 1) => Some(Label::CreditsBack),
+        (Label::MistypeSound, 1) => Some(Label::Source),
         (Label::MistypeSound, -1) => Some(Label::ExplosionSound),
-        (Label::CreditsBack, -1) => Some(Label::MistypeSound),
+        (Label::Source, 1) => Some(Label::CreditsBack),
+        (Label::Source, -1) => Some(Label::MistypeSound),
+        (Label::CreditsBack, -1) => Some(Label::Source),
         (Label::Resume, 1) => Some(Label::GameSettings),
         (Label::GameSettings, 1) => Some(Label::PauseBack),
         (Label::GameSettings, -1) => Some(Label::Resume),
