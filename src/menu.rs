@@ -991,7 +991,7 @@ pub fn volume_drag_control(
     }
 
     if let Some(p) = bar_rcp.normalized {
-        let percent = (p.x * 100.).clamp(0., 100.);
+        let percent = ((p.x + 0.5) * 100.).clamp(0., 100.);
         config.set_vol(percent as u8);
     }
 }
