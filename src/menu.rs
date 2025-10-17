@@ -749,8 +749,9 @@ pub fn credits_setup(mut commands: Commands) {
 }
 
 impl Config {
-    fn set_vol(&mut self, val: u8) {
+    pub fn set_vol(&mut self, val: u8, global_volume: &mut ResMut<GlobalVolume>) {
         self.volume = val;
+        global_volume.volume = bevy::audio::Volume::Linear(self.volume as f32 / 100.);
     }
     fn inc_vol(&mut self, val: u8, global_volume: &mut GlobalVolume) {
         self.volume = (self.volume + val).min(100);
@@ -985,6 +986,7 @@ pub fn volume_drag_control(
     mut config: ResMut<Config>,
     drag: Res<VolumeDrag>,
     bar_rcp: Single<&RelativeCursorPosition, With<VolumeControl>>,
+    mut global_volume: ResMut<GlobalVolume>,
 ) {
     if !drag.0 {
         return;
@@ -992,7 +994,7 @@ pub fn volume_drag_control(
 
     if let Some(p) = bar_rcp.normalized {
         let percent = ((p.x + 0.5) * 100.).clamp(0., 100.);
-        config.set_vol(percent as u8);
+        config.set_vol(percent as u8, &mut global_volume);
     }
 }
 

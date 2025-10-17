@@ -346,7 +346,11 @@ fn load_or_set<T: serde::de::DeserializeOwned + serde::Serialize>(
     };
 }
 
-fn setup(mut commands: Commands) {
+fn setup(
+    mut commands: Commands,
+    mut config: ResMut<Config>,
+    mut global_volume: ResMut<GlobalVolume>,
+) {
     commands.spawn((
         Camera2d,
         Projection::from(OrthographicProjection {
@@ -356,6 +360,8 @@ fn setup(mut commands: Commands) {
             ..OrthographicProjection::default_2d()
         }),
     ));
+    let vol = config.volume;
+    config.set_vol(vol, &mut global_volume);
 }
 
 fn menu_plugin(app: &mut App) {
