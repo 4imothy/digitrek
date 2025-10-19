@@ -950,7 +950,7 @@ pub fn keypress(
         }
         commands.entity(next).insert(Selected);
     }
-    if keys.just_pressed(KeyCode::Enter) {
+    if keys.any_just_pressed([KeyCode::Enter, KeyCode::Space]) {
         do_action(
             *selected_label,
             &mut commands,
