@@ -8,14 +8,12 @@ mod game;
 mod keys;
 mod menu;
 mod msg;
-use bevy::input::common_conditions::input_just_pressed;
-use bevy::{asset::RenderAssetUsages, prelude::*};
+use bevy::{asset::RenderAssetUsages, input::common_conditions::input_just_pressed, prelude::*};
 use bevy_pkv::PkvStore;
 use core::f32;
 use rand::distr::weighted::WeightedIndex;
 use serde::{Deserialize, Serialize};
-use std::f32::consts::PI;
-use std::sync::LazyLock;
+use std::{f32::consts::PI, sync::LazyLock};
 
 const SHOW_LOCAL_POINTS: bool = cfg!(feature = "show_local_points");
 const PLAYER_IMMUNE: bool = cfg!(feature = "player_immune");
