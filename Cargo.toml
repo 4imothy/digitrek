@@ -17,7 +17,8 @@ web-sys = { version = "0.3.81", features = ["Window"] }
 getrandom = { version = "0.3.3", features = ["wasm_js"] }
 
 [features]
-player_immune = []
+invincible = []
 show_local_points = []
 one_key = []
-spawn_functions = []
+max_dif = []
+min_delay = []

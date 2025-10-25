@@ -16,9 +16,10 @@ use serde::{Deserialize, Serialize};
 use std::{f32::consts::PI, sync::LazyLock};
 
 const SHOW_LOCAL_POINTS: bool = cfg!(feature = "show_local_points");
-const PLAYER_IMMUNE: bool = cfg!(feature = "player_immune");
+const INVINCIBLE: bool = cfg!(feature = "invincible");
 const ONE_KEY: bool = cfg!(feature = "one_key");
-const SPAWN_FUNCTIONS: bool = cfg!(feature = "spawn_functions");
+const MAX_DIF: bool = cfg!(feature = "max_dif");
+const MIN_DELAY: bool = cfg!(feature = "min_delay");
 
 const PLAYER_MOVEMENT_SPEED: f32 = 400.;
 const PLAYER_ROTATION_SPEED: f32 = 4.;
@@ -34,20 +35,24 @@ const OBSTACLE_FIELD_TIME_TO_ENTER_VIEWPORT: f32 = 5.;
 
 const FIRST_ENEMY_SPAWN_DELAY: f32 = 0.;
 const FIRST_OBSTACLE_SPAWN_DELAY: f32 = 10.;
-const INITIAL_ENEMY_SPAWN_DELAY_MU: f32 = 4.;
-const INITIAL_OBSTACLE_SPAWN_DELAY_MU: f32 = 8.;
-const ENEMY_SPAWN_DELAY_MIN_MU: f32 = 0.7;
-const OBSTACLE_SPAWN_DELAY_MIN_MU: f32 = 4.;
 const SPAWN_DELTA: f32 = 0.3;
 const SPAWNER_ENEMY_SPAWN_DELAY: f32 = 5.;
-const TIME_TO_MAX_DIF: f32 = 40.;
+const SPAWNER_PROJECTILE_INC_TIME: f32 = 0.1;
 
-static ENEMY_SPAWN_DECAY_RATE: LazyLock<f32> = LazyLock::new(|| {
-    (ENEMY_SPAWN_DELAY_MIN_MU / INITIAL_ENEMY_SPAWN_DELAY_MU).ln() / -TIME_TO_MAX_DIF
-});
-static OBSTACLE_SPAWN_DECAY_RATE: LazyLock<f32> = LazyLock::new(|| {
-    (OBSTACLE_SPAWN_DELAY_MIN_MU / INITIAL_OBSTACLE_SPAWN_DELAY_MU).ln() / -TIME_TO_MAX_DIF
-});
+fn enemy_delay_mu(x: f32) -> f32 {
+    if MIN_DELAY {
+        SPAWN_DELTA
+    } else {
+        7. * f32::exp(-0.07 * if MAX_DIF { f32::MAX } else { x }) + 0.5
+    }
+}
+fn obstacle_spawn_delay_mu(x: f32) -> f32 {
+    if MIN_DELAY {
+        SPAWN_DELTA * 5.
+    } else {
+        5. * f32::exp(-0.02 * if MAX_DIF { f32::MAX } else { x }) + 3.
+    }
+}
 
 const PLAYER_RADIUS: f32 = 50.;
 const OBSTACLE_RADIUS: f32 = PLAYER_RADIUS / 1.5;
@@ -173,7 +178,7 @@ const PLAYER_LOCAL_TRIANGLE: [Vec3; 3] = [
     Vec3::new(-PLAYER_RADIUS / 2., PLAYER_RADIUS, 0.),
 ];
 
-const SPAWN_LOCATION_MULTIPLIER: f32 = 1.5;
+const SPAWN_LOCATION_MULTIPLIER: f32 = 1.2;
 
 const EXPLOSION_PARTICLE_MAX_LIFETIME: f32 = 1.;
 const EXPLOSION_PARTICLE_INITIAL_ALPHA: f32 = 0.7;
@@ -297,39 +302,26 @@ enum KeyboardLayouts {
 }
 
 fn main() {
-    if SPAWN_FUNCTIONS {
-        println!(
-            "enemy:
-y = {INITIAL_ENEMY_SPAWN_DELAY_MU} * exp(-{} * x)
-y = {ENEMY_SPAWN_DELAY_MIN_MU}
-
-obstacle:
-y = {INITIAL_OBSTACLE_SPAWN_DELAY_MU} * exp(-{} * x)
-y = {OBSTACLE_SPAWN_DELAY_MIN_MU}",
-            *ENEMY_SPAWN_DECAY_RATE, *OBSTACLE_SPAWN_DECAY_RATE,
-        );
-    } else {
-        let mut pkv = PkvStore::new("timware", env!("CARGO_PKG_NAME"));
-        App::new()
-            .add_plugins((
-                DefaultPlugins.set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: env!("CARGO_PKG_NAME").to_string(),
-                        ..default()
-                    }),
+    let mut pkv = PkvStore::new("timware", env!("CARGO_PKG_NAME"));
+    App::new()
+        .add_plugins((
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: env!("CARGO_PKG_NAME").to_string(),
                     ..default()
                 }),
-                menu_plugin,
-                game_plugin,
-            ))
-            .add_message::<PauseMsg>()
-            .add_systems(Startup, setup)
-            .init_state::<Screen>()
-            .insert_resource(Config::load(&mut pkv))
-            .insert_resource(ClearColor(colors::BACKGROUND))
-            .insert_resource(pkv)
-            .run();
-    }
+                ..default()
+            }),
+            menu_plugin,
+            game_plugin,
+        ))
+        .add_message::<PauseMsg>()
+        .add_systems(Startup, setup)
+        .init_state::<Screen>()
+        .insert_resource(Config::load(&mut pkv))
+        .insert_resource(ClearColor(colors::BACKGROUND))
+        .insert_resource(pkv)
+        .run();
 }
 
 fn load_or_set<T: serde::de::DeserializeOwned + serde::Serialize>(
@@ -601,6 +593,7 @@ struct Spawner {
     enemy_delay_mu: f32,
     obstacle_delay: f32,
     obstacle_delay_mu: f32,
+    last_side: usize,
 }
 
 #[derive(Clone, Copy)]
