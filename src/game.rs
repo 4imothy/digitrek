@@ -160,8 +160,9 @@ pub fn setup(
         enemy_delay: FIRST_ENEMY_SPAWN_DELAY,
         obstacle_delay: FIRST_OBSTACLE_SPAWN_DELAY,
         enemy_spawns_since: [0, 0, 0],
-        obstacle_delay_mu: INITIAL_OBSTACLE_SPAWN_DELAY_MU,
-        enemy_delay_mu: INITIAL_ENEMY_SPAWN_DELAY_MU,
+        obstacle_delay_mu: 0.,
+        enemy_delay_mu: 0.,
+        last_side: 0,
     });
     commands.insert_resource(AudioAssets {
         projectile_launch: asset_server.load("projectile_launch.ogg"),
@@ -290,7 +291,7 @@ pub fn keypress(
     launcher: Single<&mut Transform, (With<Launcher>, Without<Player>)>,
     indicator: Single<Entity, (With<Indicator>, Without<Player>)>,
     mut enemy_query: Query<
-        (Entity, &mut Enemy, &mut Transform),
+        (Entity, &mut Enemy, &mut Transform, Option<&mut Spawning>),
         (Without<Player>, Without<Indicator>, Without<Launcher>),
     >,
     window: Single<&Window>,
@@ -328,7 +329,7 @@ pub fn keypress(
                         continue;
                     }
                     if let Some(selected) = player.selected
-                        && let Ok((selected_entity, mut selected_enemy, _)) =
+                        && let Ok((selected_entity, mut selected_enemy, _, spawning)) =
                             enemy_query.get_mut(selected)
                     {
                         found_selected = true;
@@ -357,6 +358,9 @@ pub fn keypress(
                                 selected_enemy.next_index += 1;
                                 msg.write(GameMsg::DespawnChildren(selected_entity));
                                 msg.write(GameMsg::AddText(selected_entity));
+                                if let Some(mut s) = spawning {
+                                    s.time += SPAWNER_ENEMY_KEYPRESS_INC_TIME;
+                                }
                             } else {
                                 audio.write(AudioMsg::UnmatchedKeypress);
                             }
@@ -368,8 +372,9 @@ pub fn keypress(
                         let mut closest_entity = None;
                         let mut closest_enemy = None;
                         let mut closest_enemy_transform = None;
+                        let mut closest_spawning = None;
 
-                        for (entity, enemy, enemy_transform) in enemy_query.iter_mut() {
+                        for (entity, enemy, enemy_transform, spawning) in enemy_query.iter_mut() {
                             if enemy.next_index < enemy.keys.len()
                                 && in_viewport(
                                     &enemy_transform.translation,
@@ -387,6 +392,7 @@ pub fn keypress(
                                     closest_entity = Some(entity);
                                     closest_enemy = Some(enemy);
                                     closest_enemy_transform = Some(enemy_transform);
+                                    closest_spawning = spawning;
                                 }
                             }
                         }
@@ -412,6 +418,9 @@ pub fn keypress(
                                 projectile_spawn_location(player_transform, &launcher_transform),
                             ));
                             audio.write(AudioMsg::ProjectileLaunch);
+                            if let Some(mut s) = closest_spawning {
+                                s.time += SPAWNER_ENEMY_KEYPRESS_INC_TIME;
+                            }
                         } else {
                             audio.write(AudioMsg::UnmatchedKeypress);
                         }
@@ -963,7 +972,7 @@ pub fn player_collisions(
         }
     }
 
-    if hit && !PLAYER_IMMUNE {
+    if hit && !INVINCIBLE {
         if stats.running {
             msg.write(GameMsg::Explosion(player_transform.translation.xy()));
             audio.write(AudioMsg::Explosion);
@@ -971,6 +980,29 @@ pub fn player_collisions(
             msg.write(GameMsg::GameEnd);
         }
         stats.running = false;
+    }
+}
+
+fn spawn_location(width: f32, rng: &mut rand::rngs::ThreadRng, spawner: &mut Spawner) -> Vec2 {
+    let w = SPAWN_LOCATION_MULTIPLIER * width / 2.;
+    let h = SPAWN_LOCATION_MULTIPLIER * VIEWPORT_HEIGHT / 2.;
+
+    let mut pool = [0; 3];
+    let mut count = 0;
+    for i in 0..4 {
+        if i != spawner.last_side {
+            pool[count] = i;
+            count += 1;
+        }
+    }
+
+    spawner.last_side = pool[rng.random_range(0..count)];
+
+    match spawner.last_side {
+        0 => Vec2::new(rng.random_range(-w..w), -h),
+        1 => Vec2::new(w, rng.random_range(-h..h)),
+        2 => Vec2::new(rng.random_range(-w..w), h),
+        _ => Vec2::new(-w, rng.random_range(-h..h)),
     }
 }
 
@@ -985,11 +1017,9 @@ pub fn spawn_enemies(
 
     if spawner.enemy_delay <= 0. {
         let mut rng = rand::rng();
-        let angle = rng.random_range(0.0..std::f32::consts::TAU);
 
         let width = viewport_width(&window);
-        let x = width * 0.5 * SPAWN_LOCATION_MULTIPLIER * angle.cos();
-        let y = VIEWPORT_HEIGHT * 0.5 * SPAWN_LOCATION_MULTIPLIER * angle.sin();
+
         let shape = SHAPES
             .iter()
             .find(|s| spawner.enemy_spawns_since[s.id()] >= ENEMY_FORCE_SUMMONS[s.id()] as usize)
@@ -998,11 +1028,13 @@ pub fn spawn_enemies(
             *count = if i == shape.id() { 0 } else { *count + 1 };
         }
 
-        msg.write(GameMsg::SpawnEnemy(*shape, Vec2::new(x, y), None, None));
-
-        spawner.enemy_delay_mu = (INITIAL_ENEMY_SPAWN_DELAY_MU
-            * f32::exp(-1. * *ENEMY_SPAWN_DECAY_RATE * clock.0))
-        .max(ENEMY_SPAWN_DELAY_MIN_MU);
+        msg.write(GameMsg::SpawnEnemy(
+            *shape,
+            spawn_location(width, &mut rng, &mut spawner),
+            None,
+            None,
+        ));
+        spawner.enemy_delay_mu = enemy_delay_mu(clock.0);
 
         spawner.enemy_delay = rng.random_range(
             spawner.enemy_delay_mu - SPAWN_DELTA..spawner.enemy_delay_mu + SPAWN_DELTA,
@@ -1024,18 +1056,13 @@ pub fn spawn_obstacles(
         let mut rng = rand::rng();
 
         let width = viewport_width(&window);
-        let angle = rng.random_range(0.0..std::f32::consts::TAU);
-        let x = width * 0.5 * SPAWN_LOCATION_MULTIPLIER * angle.cos();
-        let y = VIEWPORT_HEIGHT * 0.5 * SPAWN_LOCATION_MULTIPLIER * angle.sin();
-        let pos = Vec2::new(x, y);
+        let pos = spawn_location(width, &mut rng, &mut spawner);
         msg.write(GameMsg::SpawnObstacle(
             pos,
             (player_transform.translation.xy() - pos).normalize(),
         ));
 
-        spawner.obstacle_delay_mu = (INITIAL_OBSTACLE_SPAWN_DELAY_MU
-            * f32::exp(-1. * *OBSTACLE_SPAWN_DECAY_RATE * clock.0))
-        .max(OBSTACLE_SPAWN_DELAY_MIN_MU);
+        spawner.obstacle_delay_mu = obstacle_spawn_delay_mu(clock.0);
 
         spawner.obstacle_delay = rng.random_range(
             spawner.obstacle_delay_mu - SPAWN_DELTA..spawner.obstacle_delay_mu + SPAWN_DELTA,
