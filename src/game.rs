@@ -16,6 +16,7 @@ pub fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     asset_server: Res<AssetServer>,
+    config: Res<Config>,
 ) {
     let mut launcher_mesh = Mesh::new(
         bevy::render::render_resource::PrimitiveTopology::TriangleStrip,
@@ -158,7 +159,11 @@ pub fn setup(
     commands.insert_resource(Spawner {
         enemy_dist: WeightedIndex::new(ENEMY_SPAWN_WEIGHTS).unwrap(),
         enemy_delay: FIRST_ENEMY_SPAWN_DELAY,
-        obstacle_delay: FIRST_OBSTACLE_SPAWN_DELAY,
+        obstacle_delay: if config.max_difficulty || MAX_DIF || MIN_DELAY {
+            0.
+        } else {
+            FIRST_OBSTACLE_SPAWN_DELAY
+        },
         enemy_spawns_since: [0, 0, 0],
         obstacle_delay_mu: 0.,
         enemy_delay_mu: 0.,
@@ -1010,6 +1015,7 @@ pub fn spawn_enemies(
     mut msg: MessageWriter<GameMsg>,
     mut spawner: ResMut<Spawner>,
     window: Single<&Window>,
+    config: ResMut<Config>,
 ) {
     spawner.enemy_delay -= time.delta_secs();
 
@@ -1032,7 +1038,7 @@ pub fn spawn_enemies(
             None,
             None,
         ));
-        spawner.enemy_delay_mu = enemy_delay_mu(clock.0);
+        spawner.enemy_delay_mu = enemy_delay_mu(clock.0, MAX_DIF || config.max_difficulty);
 
         spawner.enemy_delay = rng.random_range(
             spawner.enemy_delay_mu - SPAWN_DELTA..spawner.enemy_delay_mu + SPAWN_DELTA,
@@ -1045,8 +1051,9 @@ pub fn spawn_obstacles(
     clock: Res<Clock>,
     mut msg: MessageWriter<GameMsg>,
     mut spawner: ResMut<Spawner>,
-    window: Single<&Window>,
     player_transform: Single<&Transform, With<Player>>,
+    window: Single<&Window>,
+    config: ResMut<Config>,
 ) {
     spawner.obstacle_delay -= time.delta_secs();
 
@@ -1060,7 +1067,8 @@ pub fn spawn_obstacles(
             (player_transform.translation.xy() - pos).normalize(),
         ));
 
-        spawner.obstacle_delay_mu = obstacle_spawn_delay_mu(clock.0);
+        spawner.obstacle_delay_mu =
+            obstacle_spawn_delay_mu(clock.0, MAX_DIF || config.max_difficulty);
 
         spawner.obstacle_delay = rng.random_range(
             spawner.obstacle_delay_mu - SPAWN_DELTA..spawner.obstacle_delay_mu + SPAWN_DELTA,
@@ -1083,7 +1091,7 @@ pub fn track_selected_enemy(
         (
             With<Indicator>,
             Without<Launcher>,
-            Without<Selected>,
+            Without<Targeted>,
             Without<Player>,
         ),
     >,
@@ -1093,7 +1101,7 @@ pub fn track_selected_enemy(
             With<Player>,
             Without<Launcher>,
             Without<Indicator>,
-            Without<Selected>,
+            Without<Targeted>,
         ),
     >,
     launcher: Single<
@@ -1101,14 +1109,14 @@ pub fn track_selected_enemy(
         (
             With<Launcher>,
             Without<Indicator>,
-            Without<Selected>,
+            Without<Targeted>,
             Without<Player>,
         ),
     >,
     selected: Query<
         &Transform,
         (
-            With<Selected>,
+            With<Targeted>,
             Without<Indicator>,
             Without<Launcher>,
             Without<Player>,

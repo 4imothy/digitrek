@@ -87,7 +87,7 @@ pub fn on_msg(
                     Obstacle {
                         direction: *direction,
                         entered_viewport: false,
-                        time_to_enter_viewport: OBSTACLE_FIELD_TIME_TO_ENTER_VIEWPORT,
+                        time_to_enter_viewport: OBSTACLE_TIME_TO_ENTER_VIEWPORT,
                         colliding: false,
                     },
                     Mesh2d(meshes.add(Circle::new(OBSTACLE_RADIUS))),
@@ -103,10 +103,12 @@ pub fn on_msg(
                 commands.entity(*entity).insert(Visibility::Visible);
             }
             GameMsg::Select(entity) => {
-                commands.entity(*entity).insert(Selected);
+                commands.entity(*entity).insert(Targeted);
             }
             GameMsg::DeSelect(entity) => {
-                commands.entity(*entity).remove::<Selected>();
+                if let Ok(mut e) = commands.get_entity(*entity) {
+                    e.remove::<Targeted>();
+                }
             }
             GameMsg::Projectile(entity, origin) => {
                 commands.spawn((

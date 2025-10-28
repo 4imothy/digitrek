@@ -6,24 +6,6 @@ use core::f32;
 
 const VOLUME_LABEL_PREFIX: &str = "volume:";
 
-#[derive(Component)]
-pub struct VolumeControl;
-
-#[derive(Component)]
-pub struct VolumeControlBar;
-
-#[derive(Component)]
-pub struct VolumeDisplay;
-
-#[derive(Component)]
-pub struct Selected;
-
-#[derive(Component)]
-pub struct Active;
-
-#[derive(Component)]
-pub struct KeyboardOption;
-
 #[derive(Component, Clone, Copy, PartialEq)]
 pub enum Label {
     Game,
@@ -40,6 +22,7 @@ pub enum Label {
     LogicalQwerty,
     LogicalDvorak,
     LogicalColemak,
+    MaxDifficulty,
     ProgrammingLanguage,
     GameEngine,
     LaunchProjectileSound,
@@ -221,6 +204,7 @@ pub fn mouse(
     >,
     keyboard_options: Query<(Entity, &Label), With<KeyboardOption>>,
     active: Query<(Entity, &Label), With<Active>>,
+    mut max_difficulty_toggle: Query<&mut BackgroundColor, With<MaxDifToggle>>,
     mut app_exit_msg: MessageWriter<AppExit>,
     mut pause_msg: MessageWriter<PauseMsg>,
     mut next_screen: ResMut<NextState<Screen>>,
@@ -240,6 +224,7 @@ pub fn mouse(
                 &mut next_game_screen,
                 &active,
                 &keyboard_options,
+                &mut max_difficulty_toggle,
                 &mut vtime,
                 &mut pkv,
                 &mut config,
@@ -264,6 +249,7 @@ fn do_action(
     next_game_screen: &mut ResMut<NextState<GameScreen>>,
     active: &Query<(Entity, &Label), With<Active>>,
     keyboard_options: &Query<(Entity, &Label), With<KeyboardOption>>,
+    max_difficulty_toggle: &mut Query<&mut BackgroundColor, With<MaxDifToggle>>,
     vtime: &mut ResMut<Time<Virtual>>,
     pkv: &mut ResMut<PkvStore>,
     config: &mut ResMut<Config>,
@@ -286,6 +272,7 @@ fn do_action(
                 &config.physical_keyboard_layout,
             );
             let _ = pkv.set(LOGICAL_KEYBOARD_LAYOUT_KEY, &config.logical_keyboard_layout);
+            let _ = pkv.set(MAX_DIFFICULTY_KEY, &config.max_difficulty);
         }
         Label::CreditsBack | Label::HelpBack => next_screen.set(Screen::MainMenu),
         Label::PhysicalQwerty | Label::PhysicalDvorak | Label::PhysicalColemak => {
@@ -341,6 +328,15 @@ fn do_action(
             vtime.unpause();
             vtime.set_relative_speed(1.);
             next_screen.set(Screen::Game);
+        }
+        Label::MaxDifficulty => {
+            config.max_difficulty = !config.max_difficulty;
+            *max_difficulty_toggle.single_mut().ok().unwrap() =
+                BackgroundColor(if config.max_difficulty {
+                    colors::SELECTED_OUTLINE
+                } else {
+                    colors::BACKGROUND
+                });
         }
         _ => {}
     }
@@ -604,7 +600,6 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                         group_label,
                         Node {
                             flex_direction: FlexDirection::Row,
-                            align_items: AlignItems::Center,
                             ..button()
                         },
                         BorderRadius::MAX,
@@ -639,6 +634,43 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                         }
                     });
             }
+
+            screen
+                .spawn((
+                    Label::MaxDifficulty,
+                    Button,
+                    BorderColor::all(colors::UNSELECTED_OUTLINE),
+                    BorderRadius::MAX,
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        ..button()
+                    },
+                ))
+                .with_children(|button| {
+                    button.spawn((
+                        Text::new("max difficulty"),
+                        FONT.clone(),
+                        TextColor(colors::TEXT_NEXT),
+                        TextLayout::new_with_no_wrap(),
+                    ));
+                    button.spawn((
+                        MaxDifToggle,
+                        Node {
+                            height: Val::Percent(80.),
+                            width: Val::Vw(2.),
+                            border: UiRect::all(Val::Vh(0.3)),
+                            margin: UiRect::left(Val::Vw(1.)),
+                            ..default()
+                        },
+                        BorderRadius::all(Val::Percent(5.)),
+                        BorderColor::all(colors::SELECTED_OUTLINE),
+                        BackgroundColor(if config.max_difficulty {
+                            colors::SELECTED_OUTLINE
+                        } else {
+                            colors::BACKGROUND
+                        }),
+                    ));
+                });
 
             screen
                 .spawn((
@@ -817,6 +849,7 @@ pub fn keypress(
     mut app_exit_msg: MessageWriter<AppExit>,
     mut pause_msg: MessageWriter<PauseMsg>,
     screen: Res<State<Screen>>,
+    mut max_difficulty_toggle: Query<&mut BackgroundColor, With<MaxDifToggle>>,
     mut vtime: ResMut<Time<Virtual>>,
     mut next_screen: ResMut<NextState<Screen>>,
     mut next_game_screen: ResMut<NextState<GameScreen>>,
@@ -915,8 +948,10 @@ pub fn keypress(
             }
         }
         (Label::LogicalKeyboardLayout, 1) => Some(Label::PhysicalKeyboardLayout),
-        (Label::PhysicalKeyboardLayout, 1) => Some(Label::SettingsBack),
-        (Label::SettingsBack, -1) => Some(Label::PhysicalKeyboardLayout),
+        (Label::PhysicalKeyboardLayout, 1) => Some(Label::MaxDifficulty),
+        (Label::MaxDifficulty, 1) => Some(Label::SettingsBack),
+        (Label::MaxDifficulty, -1) => Some(Label::PhysicalKeyboardLayout),
+        (Label::SettingsBack, -1) => Some(Label::MaxDifficulty),
         (Label::PhysicalKeyboardLayout, -1) => Some(Label::LogicalKeyboardLayout),
         (Label::LogicalKeyboardLayout, -1) => Some(Label::Volume),
         (Label::ProgrammingLanguage, 1) => Some(Label::GameEngine),
@@ -960,6 +995,7 @@ pub fn keypress(
             &mut next_game_screen,
             &active,
             &keyboard_options,
+            &mut max_difficulty_toggle,
             &mut vtime,
             &mut pkv,
             &mut config,

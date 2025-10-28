@@ -31,7 +31,7 @@ const PENTAGON_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 8.;
 const PENTAGON_ROTATION_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 6.;
 const PROJECTILE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED * 4.;
 const OBSTACLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 3.;
-const OBSTACLE_FIELD_TIME_TO_ENTER_VIEWPORT: f32 = 5.;
+const OBSTACLE_TIME_TO_ENTER_VIEWPORT: f32 = 5.;
 
 const FIRST_ENEMY_SPAWN_DELAY: f32 = 0.;
 const FIRST_OBSTACLE_SPAWN_DELAY: f32 = 10.;
@@ -39,18 +39,18 @@ const SPAWN_DELTA: f32 = 0.3;
 const SPAWNER_ENEMY_SPAWN_DELAY: f32 = 5.;
 const SPAWNER_PROJECTILE_INC_TIME: f32 = 0.1;
 
-fn enemy_delay_mu(x: f32) -> f32 {
+fn enemy_delay_mu(x: f32, max_dif: bool) -> f32 {
     if MIN_DELAY {
         SPAWN_DELTA
     } else {
-        7. * f32::exp(-0.07 * if MAX_DIF { f32::MAX } else { x }) + 0.5
+        7. * f32::exp(-0.07 * if max_dif { f32::MAX } else { x }) + 0.5
     }
 }
-fn obstacle_spawn_delay_mu(x: f32) -> f32 {
+fn obstacle_spawn_delay_mu(x: f32, max_dif: bool) -> f32 {
     if MIN_DELAY {
         SPAWN_DELTA * 5.
     } else {
-        5. * f32::exp(-0.02 * if MAX_DIF { f32::MAX } else { x }) + 3.
+        5. * f32::exp(-0.02 * if max_dif { f32::MAX } else { x }) + 3.
     }
 }
 
@@ -189,6 +189,7 @@ const HIGH_SCORE_KEY: &str = "high_score";
 const VOLUME_KEY: &str = "volume";
 const PHYSICAL_KEYBOARD_LAYOUT_KEY: &str = "physical_keyboard_layout_key";
 const LOGICAL_KEYBOARD_LAYOUT_KEY: &str = "logical_keyboard_layout_key";
+const MAX_DIFFICULTY_KEY: &str = "max_difficulty";
 
 #[derive(Resource)]
 struct Config {
@@ -196,6 +197,7 @@ struct Config {
     volume: u8,
     physical_keyboard_layout: KeyboardLayouts,
     logical_keyboard_layout: KeyboardLayouts,
+    max_difficulty: bool,
 }
 
 impl Config {
@@ -205,6 +207,7 @@ impl Config {
             volume: 100,
             physical_keyboard_layout: KeyboardLayouts::Qwerty,
             logical_keyboard_layout: KeyboardLayouts::Qwerty,
+            max_difficulty: false,
         };
         load_or_set(pkv, HIGH_SCORE_KEY, &mut config.high_score);
         load_or_set(pkv, VOLUME_KEY, &mut config.volume);
@@ -218,6 +221,7 @@ impl Config {
             LOGICAL_KEYBOARD_LAYOUT_KEY,
             &mut config.logical_keyboard_layout,
         );
+        load_or_set(pkv, MAX_DIFFICULTY_KEY, &mut config.max_difficulty);
         config
     }
 
@@ -613,7 +617,7 @@ struct Spawning {
 }
 
 #[derive(Component)]
-struct Selected;
+struct Targeted;
 
 #[derive(Component)]
 struct ToDespawn;
@@ -717,6 +721,27 @@ struct ResumeCountdown {
 
 #[derive(Resource)]
 struct VolumeDrag(bool);
+
+#[derive(Component)]
+pub struct VolumeControl;
+
+#[derive(Component)]
+pub struct VolumeControlBar;
+
+#[derive(Component)]
+pub struct VolumeDisplay;
+
+#[derive(Component)]
+pub struct MaxDifToggle;
+
+#[derive(Component)]
+pub struct Selected;
+
+#[derive(Component)]
+pub struct Active;
+
+#[derive(Component)]
+pub struct KeyboardOption;
 
 #[derive(Resource)]
 struct Clock(f32);
