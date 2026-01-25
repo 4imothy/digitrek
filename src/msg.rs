@@ -35,7 +35,7 @@ pub fn on_msg(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut msg: MessageReader<GameMsg>,
-    enemies: Query<&Enemy, Without<ToDespawn>>,
+    enemies: Query<&Foe, Without<ToDespawn>>,
     mut config: ResMut<Config>,
     stats: Single<&mut Stats>,
     mut pkv: ResMut<PkvStore>,
@@ -66,11 +66,17 @@ pub fn on_msg(
                 if let Ok(enemy) = enemies.get(*entity)
                     && !enemy.keys.is_empty()
                 {
-                    add_text(&mut cmd, &enemy.keys, enemy.next_index);
+                    add_text(
+                        &mut cmd,
+                        &enemy.keys,
+                        enemy.orig_len.saturating_sub(enemy.cleared + enemy.skipped),
+                        enemy.cleared,
+                        enemy.next_index,
+                    );
                 }
             }
-            GameMsg::SpawnEnemy(shape, pos, spawned_by, rot) => {
-                spawn_enemy(
+            GameMsg::SpawnFoe(shape, pos, spawned_by, rot) => {
+                spawn_foe(
                     &mut rng,
                     &mut commands,
                     &mut meshes,
@@ -86,7 +92,7 @@ pub fn on_msg(
                 commands.spawn((
                     Obstacle {
                         direction: *direction,
-                        entered_viewport: false,
+                        entered_view: false,
                         time_to_enter_viewport: OBSTACLE_TIME_TO_ENTER_VIEWPORT,
                         colliding: false,
                     },
@@ -155,8 +161,8 @@ fn spawn_explosion(
             )))),
             MeshMaterial2d(material.clone()),
             Transform::from_translation(loc.extend(rng.random_range(
-                PARTICLE_Z_INDEX - EXPLOSION_Z_INDEX_RANGE
-                    ..PARTICLE_Z_INDEX + EXPLOSION_Z_INDEX_RANGE,
+                EXPLOSION_Z_INDEX - EXPLOSION_Z_INDEX_RANGE
+                    ..EXPLOSION_Z_INDEX + EXPLOSION_Z_INDEX_RANGE,
             ))),
             ExplosionParticle {
                 velocity,
@@ -167,40 +173,50 @@ fn spawn_explosion(
     }
 }
 
-fn add_text(commands: &mut EntityCommands, keys: &str, next_index: usize) {
+fn add_text(
+    commands: &mut EntityCommands,
+    keys: &[char],
+    to_show: usize,
+    cleared: usize,
+    next_index: usize,
+) {
     commands.with_children(|commands| {
-        let mut chars = keys.chars();
-        commands
-            .spawn((
-                Text2d::new(chars.next().unwrap()),
-                TextLayout::default(),
-                FONT.clone(),
-                TextColor(if next_index == 0 {
-                    colors::TEXT_NEXT
-                } else {
-                    colors::TEXT_DONE
-                }),
-                EnemyText,
-            ))
-            .with_children(|commands| {
-                for (i, c) in chars.enumerate() {
-                    commands.spawn((
-                        TextSpan::new(c),
-                        TextColor(if next_index == i + 1 {
-                            colors::TEXT_NEXT
-                        } else if next_index > i + 1 {
-                            colors::TEXT_DONE
-                        } else {
-                            colors::TEXT_FUTURE
-                        }),
-                        FONT.clone(),
-                    ));
-                }
-            });
+        let mut iter = keys.iter().enumerate().skip(cleared).take(to_show);
+        if let Some((i, &char)) = iter.next() {
+            commands
+                .spawn((
+                    Text2d::new(char),
+                    TextLayout::default(),
+                    FONT.clone(),
+                    TextColor(if next_index == i {
+                        colors::TEXT_NEXT
+                    } else if next_index > i {
+                        colors::TEXT_DONE
+                    } else {
+                        colors::TEXT_FUTURE
+                    }),
+                    EnemyText,
+                ))
+                .with_children(|commands| {
+                    for (i, &c) in iter {
+                        commands.spawn((
+                            TextSpan::new(c),
+                            TextColor(if next_index == i {
+                                colors::TEXT_NEXT
+                            } else if next_index > i {
+                                colors::TEXT_DONE
+                            } else {
+                                colors::TEXT_FUTURE
+                            }),
+                            FONT.clone(),
+                        ));
+                    }
+                });
+        }
     });
 }
 
-fn spawn_enemy(
+fn spawn_foe(
     rng: &mut ThreadRng,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -217,22 +233,21 @@ fn spawn_enemy(
         Shape::Pentagon => (meshes.add(PENTAGON), colors::PENTAGON, PENTAGON_NUM_KEYS),
     };
 
-    let keys = (0..num_keys)
-        .map(|_| {
-            if ONE_KEY {
-                config.keypool()[0]
-            } else {
-                config.keypool()[rng.random_range(0..keys::QWERTY_POOL.len())]
-            }
-        })
-        .collect::<String>();
+    let keys: [char; FOE_MAX_NUM_KEYS] = std::array::from_fn(|_| {
+        if ONE_KEY {
+            config.keypool()[0]
+        } else {
+            config.keypool()[rng.random_range(0..keys::QWERTY_POOL.len())]
+        }
+    });
+
     let mut ent_cmds = commands.spawn((
         Mesh2d(mesh),
         Transform {
             translation: pos.extend(if matches!(shape, Shape::Triangle | Shape::Rhombus) {
                 TRACKING_Z_INDEX
             } else {
-                SPAWNER_Z_INDEX
+                SUMMONER_Z_INDEX
             }),
             rotation: rot.map(Quat::from_rotation_z).unwrap_or_default(),
             ..default()
@@ -244,14 +259,16 @@ fn spawn_enemy(
             ent_cmds.insert(Tracking);
         }
         Shape::Pentagon => {
-            ent_cmds.insert(Spawning {
-                time: 0.,
-                entered_view: false,
+            ent_cmds.insert(Summoner {
+                since: 0.,
+                delay: PENTAGON_SPAWN_DELAY,
+                rotating: false,
+                foe_dist: WeightedIndex::new(PENTAGON_SUMMON_WEIGHTS).unwrap(),
             });
         }
     }
-    add_text(&mut ent_cmds, &keys, 0);
-    let e = Enemy::new(shape, keys, spawned_by);
+    add_text(&mut ent_cmds, &keys, num_keys, 0, 0);
+    let e = Foe::new(shape, keys, num_keys, spawned_by);
     ent_cmds.insert(e);
 
     if SHOW_LOCAL_POINTS {
@@ -282,11 +299,11 @@ fn replace_shape(
     let (mesh, color) = match shape {
         Shape::Triangle => (meshes.add(TRIANGLE), materials.add(colors::TRIANGLE)),
         Shape::Rhombus => (meshes.add(RHOMBUS), materials.add(colors::RHOMBUS)),
-        Shape::Pentagon => return,
+        Shape::Pentagon => unreachable!(),
     };
     let mut ent_cmds = commands.entity(entity);
     if let Shape::Rhombus = shape {
-        ent_cmds.remove::<Spawning>();
+        ent_cmds.remove::<Summoner>();
         ent_cmds.insert(Tracking);
     }
     ent_cmds.insert(MeshMaterial2d(color)).insert(Mesh2d(mesh));

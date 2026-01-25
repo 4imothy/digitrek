@@ -8,7 +8,11 @@ mod game;
 mod keys;
 mod menu;
 mod msg;
-use bevy::{asset::RenderAssetUsages, input::common_conditions::input_just_pressed, prelude::*};
+use bevy::{
+    asset::{AssetMetaCheck, RenderAssetUsages},
+    input::common_conditions::input_just_pressed,
+    prelude::*,
+};
 use bevy_pkv::PkvStore;
 use core::f32;
 use rand::distr::weighted::WeightedIndex;
@@ -20,32 +24,34 @@ const INVINCIBLE: bool = cfg!(feature = "invincible");
 const ONE_KEY: bool = cfg!(feature = "one_key");
 const MAX_DIF: bool = cfg!(feature = "max_dif");
 const MIN_DELAY: bool = cfg!(feature = "min_delay");
+const MOVEMENT_FACTOR: f32 = 1.;
 
-const PLAYER_MOVEMENT_SPEED: f32 = 400.;
-const PLAYER_ROTATION_SPEED: f32 = 4.;
+const PLAYER_MOVEMENT_SPEED: f32 = 400. * MOVEMENT_FACTOR;
+const PLAYER_ROTATION_SPEED: f32 = 4. * MOVEMENT_FACTOR;
 const TRIANGLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 4.;
 const TRIANGLE_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 6.;
 const RHOMBUS_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 6.;
 const RHOMBUS_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 8.;
 const PENTAGON_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 8.;
-const PENTAGON_ROTATION_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 6.;
+const PENTAGON_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 6.;
 const PROJECTILE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED * 4.;
 const OBSTACLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 3.;
 const OBSTACLE_TIME_TO_ENTER_VIEWPORT: f32 = 5.;
 
-const FIRST_ENEMY_SPAWN_DELAY: f32 = 0.;
+const FIRST_FOE_SPAWN_DELAY: f32 = 0.;
 const FIRST_OBSTACLE_SPAWN_DELAY: f32 = 10.;
 const SPAWN_DELTA: f32 = 0.3;
-const SPAWNER_ENEMY_SPAWN_DELAY: f32 = 5.;
-const SPAWNER_PROJECTILE_INC_TIME: f32 = 0.1;
+const PENTAGON_SPAWN_DELAY: f32 = 5.;
+const SUMMONER_PROJECTILE_INC_TIME: f32 = 0.1;
 
-fn enemy_delay_mu(x: f32, max_dif: bool) -> f32 {
+fn spawner_foe_delay_mu(x: f32, max_dif: bool) -> f32 {
     if MIN_DELAY {
         SPAWN_DELTA
     } else {
         7. * f32::exp(-0.07 * if max_dif { f32::MAX } else { x }) + 0.5
     }
 }
+
 fn obstacle_spawn_delay_mu(x: f32, max_dif: bool) -> f32 {
     if MIN_DELAY {
         SPAWN_DELTA * 5.
@@ -75,12 +81,13 @@ static FONT: LazyLock<TextFont> = LazyLock::new(|| TextFont {
 });
 const SCORE_TEXT_PADDING: f32 = 10.;
 
-const TRACKING_Z_INDEX: f32 = 1.;
-const OBSTACLE_Z_INDEX: f32 = 0.;
-const PARTICLE_Z_INDEX: f32 = 0.;
+const TRACKING_Z_INDEX: f32 = 2.;
+const OBSTACLE_Z_INDEX: f32 = 1.;
+const EXPLOSION_Z_INDEX: f32 = 0.;
 const EXPLOSION_Z_INDEX_RANGE: f32 = 0.1;
-const SPAWNER_Z_INDEX: f32 = 2.;
-const PLAYER_Z_INDEX: f32 = 3.;
+const SUMMONER_Z_INDEX: f32 = 3.;
+const INDICATOR_Z_INDEX: f32 = 5.;
+const PLAYER_Z_INDEX: f32 = 4.;
 const VIEWPORT_HEIGHT: f32 = 1000.;
 
 mod palette {
@@ -124,27 +131,29 @@ mod colors {
 const TRIANGLE_NUM_KEYS: usize = 1;
 const RHOMBUS_NUM_KEYS: usize = 2;
 const PENTAGON_NUM_KEYS: usize = 3;
-const SPAWNER_CHILD_COLLISION_PADDING: f32 = PLAYER_RADIUS / 2.;
+const FOE_MAX_NUM_KEYS: usize = PENTAGON_NUM_KEYS;
+const SUMMONER_COLLISION_PADDING: f32 = PLAYER_RADIUS / 2.;
 
 const BOUNCE_DECAY: f32 = 5.;
 const BOUNCE_DURATION: f32 = 0.5;
 
 const NUM_SHAPES: usize = 3;
 const SHAPES: [Shape; NUM_SHAPES] = [Shape::Triangle, Shape::Rhombus, Shape::Pentagon];
-const ENEMY_SPAWN_WEIGHTS: [f32; NUM_SHAPES] = [0.1, 0.5, 0.4];
-const ENEMY_SPAWN_SINCE_FACTOR: f32 = 5.;
-const ENEMY_FORCE_SUMMONS: [f32; 3] = [
-    ENEMY_SPAWN_SINCE_FACTOR / ENEMY_SPAWN_WEIGHTS[0],
-    ENEMY_SPAWN_SINCE_FACTOR / ENEMY_SPAWN_WEIGHTS[1],
-    ENEMY_SPAWN_SINCE_FACTOR / ENEMY_SPAWN_WEIGHTS[2],
+const SPAWNER_FOE_WEIGHTS: [f32; NUM_SHAPES] = [0.1, 0.5, 0.4];
+const PENTAGON_SUMMON_WEIGHTS: [f32; 1] = [1.0];
+const FOE_SPAWN_SINCE_FACTOR: f32 = 5.;
+const FOE_FORCE_SUMMONS: [f32; 3] = [
+    FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[0],
+    FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[1],
+    FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[2],
 ];
 
-const ENEMY_SIZE: f32 = PLAYER_RADIUS * 1.2;
+const FOE_SIZE: f32 = PLAYER_RADIUS * 1.2;
 const TRIANGLE_CENTERING_OFFSET_Y: f32 = PLAYER_RADIUS / 2.5;
 const TRIANGLE_LOCAL_POINTS: [Vec3; 3] = [
-    Vec3::new(0., ENEMY_SIZE - TRIANGLE_CENTERING_OFFSET_Y, 0.),
-    Vec3::new(ENEMY_SIZE / 2., -TRIANGLE_CENTERING_OFFSET_Y, 0.),
-    Vec3::new(-ENEMY_SIZE / 2., -TRIANGLE_CENTERING_OFFSET_Y, 0.),
+    Vec3::new(0., FOE_SIZE - TRIANGLE_CENTERING_OFFSET_Y, 0.),
+    Vec3::new(FOE_SIZE / 2., -TRIANGLE_CENTERING_OFFSET_Y, 0.),
+    Vec3::new(-FOE_SIZE / 2., -TRIANGLE_CENTERING_OFFSET_Y, 0.),
 ];
 const TRIANGLE: Triangle2d = Triangle2d::new(
     Vec2::new(TRIANGLE_LOCAL_POINTS[0].x, TRIANGLE_LOCAL_POINTS[0].y),
@@ -152,10 +161,10 @@ const TRIANGLE: Triangle2d = Triangle2d::new(
     Vec2::new(TRIANGLE_LOCAL_POINTS[2].x, TRIANGLE_LOCAL_POINTS[2].y),
 );
 const RHOMBUS_LOCAL_POINTS: [Vec3; 4] = [
-    Vec3::new(0., -ENEMY_SIZE, 0.),
-    Vec3::new(-ENEMY_SIZE / 1.5, 0., 0.),
-    Vec3::new(ENEMY_SIZE / 1.5, 0., 0.),
-    Vec3::new(0., ENEMY_SIZE, 0.),
+    Vec3::new(0., -FOE_SIZE, 0.),
+    Vec3::new(-FOE_SIZE / 1.5, 0., 0.),
+    Vec3::new(FOE_SIZE / 1.5, 0., 0.),
+    Vec3::new(0., FOE_SIZE, 0.),
 ];
 const RHOMBUS: Rhombus = Rhombus {
     half_diagonals: Vec2::new(RHOMBUS_LOCAL_POINTS[2].x, RHOMBUS_LOCAL_POINTS[3].y),
@@ -169,7 +178,7 @@ static PENTAGON_LOCAL_POINTS: LazyLock<[Vec3; 5]> = LazyLock::new(|| {
     points
 });
 const PENTAGON: RegularPolygon = RegularPolygon {
-    circumcircle: Circle { radius: ENEMY_SIZE },
+    circumcircle: Circle { radius: FOE_SIZE },
     sides: 5,
 };
 const PLAYER_LOCAL_TRIANGLE: [Vec3; 3] = [
@@ -309,13 +318,18 @@ fn main() {
     let mut pkv = PkvStore::new("timware", env!("CARGO_PKG_NAME"));
     App::new()
         .add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: env!("CARGO_PKG_NAME").to_string(),
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: env!("CARGO_PKG_NAME").to_string(),
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(AssetPlugin {
+                    meta_check: AssetMetaCheck::Never,
                     ..default()
                 }),
-                ..default()
-            }),
             menu_plugin,
             game_plugin,
         ))
@@ -409,7 +423,7 @@ fn game_plugin(app: &mut App) {
     let exit = (
         game::default_state,
         game::despawn::<Player>,
-        game::despawn::<Enemy>,
+        game::despawn::<Foe>,
         game::despawn::<Obstacle>,
         game::despawn::<ExplosionParticle>,
         game::despawn::<Projectile>,
@@ -419,13 +433,6 @@ fn game_plugin(app: &mut App) {
     );
     app.add_systems(OnEnter(Screen::Game), game::setup)
         .add_systems(OnExit(Screen::Game), exit)
-        .add_systems(
-            OnTransition {
-                exited: Screen::Game,
-                entered: Screen::Game,
-            },
-            (exit, game::setup).chain(),
-        )
         .insert_resource(Time::<Fixed>::from_hz(60.))
         .init_state::<GameScreen>()
         .add_message::<GameMsg>()
@@ -457,7 +464,7 @@ fn game_plugin(app: &mut App) {
                 game::update_spawned_relations,
                 game::player_collisions,
                 game::obstacle_collisions,
-                game::spawn_enemies,
+                game::spawner,
                 game::spawn_obstacles,
                 game::track_selected_enemy,
                 game::update_clock,
@@ -470,9 +477,10 @@ fn game_plugin(app: &mut App) {
                 game::player_movement,
                 game::keypress,
                 game::slowdown_time,
-                game::projectile_movement,
-                game::tracking_enemy,
-                game::spawning_enemy,
+                game::projectile,
+                game::tracking_foe,
+                game::summoner_foe,
+                game::summoner,
                 game::obstacle,
                 game::explosion_system,
             )
@@ -574,7 +582,7 @@ enum GameMsg {
     DespawnChildren(Entity),
     ReplaceShape(Entity, Shape),
     AddText(Entity),
-    SpawnEnemy(Shape, Vec2, Option<Entity>, Option<f32>),
+    SpawnFoe(Shape, Vec2, Option<Entity>, Option<f32>),
     SpawnObstacle(Vec2, Vec2),
     Invisible(Entity),
     Visible(Entity),
@@ -591,13 +599,21 @@ enum PauseMsg {
 
 #[derive(Resource)]
 struct Spawner {
-    enemy_dist: WeightedIndex<f32>,
-    enemy_spawns_since: [usize; NUM_SHAPES],
-    enemy_delay: f32,
-    enemy_delay_mu: f32,
+    foe_dist: WeightedIndex<f32>,
+    foe_spawns_since: [usize; NUM_SHAPES],
+    foe_delay: f32,
+    foe_delay_mu: f32,
     obstacle_delay: f32,
     obstacle_delay_mu: f32,
     last_side: usize,
+}
+
+#[derive(Component)]
+struct Summoner {
+    since: f32,
+    delay: f32,
+    foe_dist: WeightedIndex<f32>,
+    rotating: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -611,12 +627,6 @@ enum Shape {
 struct Tracking;
 
 #[derive(Component)]
-struct Spawning {
-    time: f32,
-    entered_view: bool,
-}
-
-#[derive(Component)]
 struct Targeted;
 
 #[derive(Component)]
@@ -624,17 +634,20 @@ struct ToDespawn;
 
 #[derive(Component)]
 struct Indicator {
-    tracking: bool,
+    active: bool,
 }
 
 #[derive(Component)]
 struct Launcher;
 
 #[derive(Component)]
-struct Enemy {
+struct Foe {
     shape: Shape,
-    keys: String,
+    keys: [char; FOE_MAX_NUM_KEYS],
+    cleared: usize,
+    skipped: usize,
     next_index: usize,
+    orig_len: usize,
     bounce_velocity: Option<Vec2>,
     bounce_timer: f32,
     colliding: bool,
@@ -653,7 +666,7 @@ struct Slowdown {
 struct Obstacle {
     direction: Vec2,
     time_to_enter_viewport: f32,
-    entered_viewport: bool,
+    entered_view: bool,
     colliding: bool,
 }
 
@@ -681,12 +694,20 @@ impl AudioMsg {
     }
 }
 
-impl Enemy {
-    pub fn new(shape: Shape, keys: String, spawned_by: Option<Entity>) -> Self {
-        Enemy {
+impl Foe {
+    pub fn new(
+        shape: Shape,
+        keys: [char; FOE_MAX_NUM_KEYS],
+        orig_len: usize,
+        spawned_by: Option<Entity>,
+    ) -> Self {
+        Foe {
             shape,
             keys,
             next_index: 0,
+            cleared: 0,
+            skipped: 0,
+            orig_len,
             bounce_velocity: None,
             bounce_timer: 0.,
             colliding: false,

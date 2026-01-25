@@ -91,6 +91,7 @@ fn button() -> Node {
         justify_content: JustifyContent::Center,
         align_items: AlignItems::Center,
         border: UiRect::all(Val::Vh(0.3)),
+        border_radius: BorderRadius::MAX,
         ..default()
     }
 }
@@ -145,7 +146,6 @@ pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
                     Button,
                     Node { ..button() },
                     BorderColor::all(colors::UNSELECTED_OUTLINE),
-                    BorderRadius::MAX,
                     action,
                 ));
                 entity.with_children(|parent| {
@@ -357,9 +357,9 @@ pub fn pause_setup(mut commands: Commands) {
                     top: Val::Percent(0.),
                     bottom: Val::Percent(0.),
                 },
+                border_radius: BorderRadius::all(Val::Percent(5.)),
                 ..screen_node()
             },
-            BorderRadius::all(Val::Percent(5.)),
             BackgroundColor(colors::IN_GAME_MENU),
         ))
         .with_children(|cmd| {
@@ -377,7 +377,6 @@ pub fn pause_setup(mut commands: Commands) {
                     Button,
                     Node { ..button() },
                     BorderColor::all(colors::UNSELECTED_OUTLINE),
-                    BorderRadius::MAX,
                     action,
                 ));
                 entity.with_children(|parent| {
@@ -403,7 +402,6 @@ pub fn end_setup(mut commands: Commands, stats: Single<&mut Stats>) {
                 },
                 ..screen_node()
             },
-            BorderRadius::all(Val::Percent(5.)),
             BackgroundColor(colors::IN_GAME_MENU),
         ))
         .with_children(|cmd| {
@@ -417,7 +415,6 @@ pub fn end_setup(mut commands: Commands, stats: Single<&mut Stats>) {
                     Button,
                     Node { ..button() },
                     BorderColor::all(colors::UNSELECTED_OUTLINE),
-                    BorderRadius::MAX,
                     action,
                 ));
                 entity.with_children(|parent| {
@@ -448,10 +445,10 @@ pub fn resume_countdown_setup(mut commands: Commands) {
                 Val::Percent(0.),
                 Val::Percent(0.),
             ),
+            border_radius: BorderRadius::all(Val::Percent(100.)),
             ..default()
         },
         BackgroundColor(colors::IN_GAME_MENU),
-        BorderRadius::all(Val::Percent(100.)),
         Text::new((TIME_BEFORE_RESUME as usize).to_string()),
         FONT.clone(),
         TextLayout::new_with_justify(Justify::Center),
@@ -485,7 +482,6 @@ pub fn help_setup(mut commands: Commands, config: Res<Config>) {
                     Label::HelpBack,
                     Button,
                     BorderColor::all(colors::UNSELECTED_OUTLINE),
-                    BorderRadius::MAX,
                     Node { ..button() },
                     Selected,
                 ))
@@ -512,7 +508,6 @@ pub fn game_settings_setup(mut commands: Commands, config: Res<Config>) {
                 },
                 ..screen_node()
             },
-            BorderRadius::all(Val::Percent(5.)),
             BackgroundColor(colors::IN_GAME_MENU.with_alpha(1.)),
         ))
         .with_children(|screen| {
@@ -522,7 +517,6 @@ pub fn game_settings_setup(mut commands: Commands, config: Res<Config>) {
                     Label::GameSettingsBack,
                     Button,
                     BorderColor::all(colors::UNSELECTED_OUTLINE),
-                    BorderRadius::MAX,
                     Node { ..button() },
                 ))
                 .with_children(|button| {
@@ -602,7 +596,6 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                             flex_direction: FlexDirection::Row,
                             ..button()
                         },
-                        BorderRadius::MAX,
                         BorderColor::all(colors::UNSELECTED_OUTLINE),
                     ))
                     .with_children(|row| {
@@ -618,7 +611,6 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                                 button_label,
                                 Node { ..button() },
                                 BorderColor::all(colors::UNSELECTED_OUTLINE),
-                                BorderRadius::MAX,
                                 KeyboardOption,
                             ));
                             if active {
@@ -640,7 +632,6 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                     Label::MaxDifficulty,
                     Button,
                     BorderColor::all(colors::UNSELECTED_OUTLINE),
-                    BorderRadius::MAX,
                     Node {
                         flex_direction: FlexDirection::Row,
                         ..button()
@@ -660,9 +651,9 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                             width: Val::Vw(2.),
                             border: UiRect::all(Val::Vh(0.3)),
                             margin: UiRect::left(Val::Vw(1.)),
+                            border_radius: BorderRadius::all(Val::Percent(100.)),
                             ..default()
                         },
-                        BorderRadius::all(Val::Percent(5.)),
                         BorderColor::all(colors::SELECTED_OUTLINE),
                         BackgroundColor(if config.max_difficulty {
                             colors::SELECTED_OUTLINE
@@ -677,7 +668,6 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                     Label::SettingsBack,
                     Button,
                     BorderColor::all(colors::UNSELECTED_OUTLINE),
-                    BorderRadius::MAX,
                     Node { ..button() },
                 ))
                 .with_children(|button| {
@@ -711,7 +701,6 @@ fn add_volume(par: &mut RelatedSpawnerCommands<ChildOf>, config: &Config) {
         },
         VolumeControl,
         BorderColor::all(colors::UNSELECTED_OUTLINE),
-        BorderRadius::MAX,
         Button,
         Label::Volume,
         RelativeCursorPosition::default(),
@@ -752,7 +741,6 @@ pub fn credits_setup(mut commands: Commands) {
                     label,
                     Button,
                     BorderColor::all(colors::UNSELECTED_OUTLINE),
-                    BorderRadius::MAX,
                     Node { ..button() },
                 ));
                 if let Label::ProgrammingLanguage = label {
@@ -767,7 +755,6 @@ pub fn credits_setup(mut commands: Commands) {
                     Label::CreditsBack,
                     Button,
                     BorderColor::all(colors::UNSELECTED_OUTLINE),
-                    BorderRadius::MAX,
                     Node { ..button() },
                 ))
                 .with_children(|button| {
