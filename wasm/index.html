@@ -1,10 +1,11 @@
 <!-- SPDX-License-Identifier: MIT -->
 
-<html lang="en">
+<html lang='en'>
   <head>
-    <meta charset="UTF-8" />
+    <meta charset='UTF-8' />
     <style>
-      html, body {
+      html,
+      body {
         height: 100%;
         margin: 0;
         display: flex;
@@ -20,18 +21,24 @@
       }
 
       canvas:focus {
-          outline: none;
-          border: none;
+        outline: none;
+        border: none;
       }
     </style>
     <title>digitrek</title>
-    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel='icon' type='image/svg+xml' href='favicon.svg' />
+    <link rel='manifest' href='manifest.json' />
   </head>
   <body>
-    <script type="module">
-      import './restart_audio_context.js'
-      import init from './digitrek.js'
-      init()
+    <script type='module'>
+      import './restart_audio_context.js';
+      import init from './digitrek.js';
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('./service_worker.js');
+        });
+      }
+      init();
     </script>
   </body>
 </html>

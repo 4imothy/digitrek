@@ -5,3 +5,5 @@
 !/wasm/favicon.svg
 !/wasm/index.html
 !/wasm/restart_audio_context.js
+!/wasm/service_worker.js
+!/wasm/manifest.json

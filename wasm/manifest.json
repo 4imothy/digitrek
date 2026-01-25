@@ -1,0 +1,13 @@
+{
+  "name": "digitrek",
+  "start_url": ".",
+  "display": "standalone",
+  "orientation": "landscape",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
