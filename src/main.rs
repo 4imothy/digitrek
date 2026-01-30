@@ -24,10 +24,9 @@ const INVINCIBLE: bool = cfg!(feature = "invincible");
 const ONE_KEY: bool = cfg!(feature = "one_key");
 const MAX_DIF: bool = cfg!(feature = "max_dif");
 const MIN_DELAY: bool = cfg!(feature = "min_delay");
-const MOVEMENT_FACTOR: f32 = 1.;
 
-const PLAYER_MOVEMENT_SPEED: f32 = 400. * MOVEMENT_FACTOR;
-const PLAYER_ROTATION_SPEED: f32 = 4. * MOVEMENT_FACTOR;
+const PLAYER_MOVEMENT_SPEED: f32 = 400.;
+const PLAYER_ROTATION_SPEED: f32 = 4.;
 const TRIANGLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 4.;
 const TRIANGLE_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 6.;
 const RHOMBUS_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 6.;
@@ -37,12 +36,74 @@ const PENTAGON_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 6.;
 const PROJECTILE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED * 4.;
 const OBSTACLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 3.;
 const OBSTACLE_TIME_TO_ENTER_VIEWPORT: f32 = 5.;
+const BOUNCE_DECAY: f32 = 5.;
+const BOUNCE_DURATION: f32 = 0.5;
 
 const FIRST_FOE_SPAWN_DELAY: f32 = 0.;
 const FIRST_OBSTACLE_SPAWN_DELAY: f32 = 10.;
 const SPAWN_DELTA: f32 = 0.3;
+const SPAWN_LOCATION_MULTIPLIER: f32 = 1.2;
+const NUM_SHAPES: usize = 3;
+const SHAPES: [Shape; NUM_SHAPES] = [Shape::Triangle, Shape::Rhombus, Shape::Pentagon];
+const SPAWNER_FOE_WEIGHTS: [f32; NUM_SHAPES] = [0.1, 0.5, 0.4];
+const FOE_SPAWN_SINCE_FACTOR: f32 = 5.;
+const FOE_FORCE_SUMMONS: [f32; 3] = [
+    FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[0],
+    FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[1],
+    FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[2],
+];
+
+const TRIANGLE_NUM_KEYS: usize = 1;
+const RHOMBUS_NUM_KEYS: usize = 2;
+const PENTAGON_NUM_KEYS: usize = 3;
+const FOE_MAX_NUM_KEYS: usize = PENTAGON_NUM_KEYS;
+const PENTAGON_SUMMON_WEIGHTS: [f32; 1] = [1.0];
 const PENTAGON_SPAWN_DELAY: f32 = 5.;
 const SUMMONER_PROJECTILE_INC_TIME: f32 = 0.1;
+const SUMMONER_COLLISION_PADDING: f32 = PLAYER_RADIUS / 2.;
+const SUMMONER_ORBIT_RADIUS: f32 = PLAYER_RADIUS * 7.;
+const COS_MIN_LEADING_VERTEX_ALIGNMENT: f32 = 0.3;
+
+const FOE_SIZE: f32 = PLAYER_RADIUS * 1.2;
+const TRIANGLE_CENTERING_OFFSET_Y: f32 = PLAYER_RADIUS / 2.5;
+const TRIANGLE_LOCAL_POINTS: [Vec3; 3] = [
+    Vec3::new(0., FOE_SIZE - TRIANGLE_CENTERING_OFFSET_Y, 0.),
+    Vec3::new(FOE_SIZE / 2., -TRIANGLE_CENTERING_OFFSET_Y, 0.),
+    Vec3::new(-FOE_SIZE / 2., -TRIANGLE_CENTERING_OFFSET_Y, 0.),
+];
+const TRIANGLE: Triangle2d = Triangle2d::new(
+    Vec2::new(TRIANGLE_LOCAL_POINTS[0].x, TRIANGLE_LOCAL_POINTS[0].y),
+    Vec2::new(TRIANGLE_LOCAL_POINTS[1].x, TRIANGLE_LOCAL_POINTS[1].y),
+    Vec2::new(TRIANGLE_LOCAL_POINTS[2].x, TRIANGLE_LOCAL_POINTS[2].y),
+);
+const RHOMBUS_LOCAL_POINTS: [Vec3; 4] = [
+    Vec3::new(0., -FOE_SIZE, 0.),
+    Vec3::new(-FOE_SIZE / 1.5, 0., 0.),
+    Vec3::new(FOE_SIZE / 1.5, 0., 0.),
+    Vec3::new(0., FOE_SIZE, 0.),
+];
+const RHOMBUS: Rhombus = Rhombus {
+    half_diagonals: Vec2::new(RHOMBUS_LOCAL_POINTS[2].x, RHOMBUS_LOCAL_POINTS[3].y),
+};
+static PENTAGON_LOCAL_POINTS: LazyLock<[Vec3; 5]> = LazyLock::new(|| {
+    let verts = PENTAGON.vertices(0.);
+    let mut points = [Vec3::ZERO; 5];
+    for (i, v) in verts.into_iter().enumerate() {
+        points[i] = v.extend(0.);
+    }
+    points
+});
+static PENTAGON_VERTEX_DIRS: LazyLock<[Vec2; 5]> =
+    LazyLock::new(|| PENTAGON_LOCAL_POINTS.map(|p| p.xy().normalize()));
+const PENTAGON: RegularPolygon = RegularPolygon {
+    circumcircle: Circle { radius: FOE_SIZE },
+    sides: 5,
+};
+const PLAYER_LOCAL_TRIANGLE: [Vec3; 3] = [
+    Vec3::new(0., 0., 0.),
+    Vec3::new(PLAYER_RADIUS / 2., PLAYER_RADIUS, 0.),
+    Vec3::new(-PLAYER_RADIUS / 2., PLAYER_RADIUS, 0.),
+];
 
 fn spawner_foe_delay_mu(x: f32, max_dif: bool) -> f32 {
     if MIN_DELAY {
@@ -71,6 +132,15 @@ const INDICATOR_THICKNESS: f32 = PLAYER_RADIUS / 10.;
 const INDICATOR_RADIUS: f32 = 1.5 * PLAYER_RADIUS;
 const INDICATOR_LONG_RECTANGLE_LENGTH: f32 = INDICATOR_THICKNESS * 3.;
 
+const TRACKING_Z_INDEX: f32 = 2.;
+const OBSTACLE_Z_INDEX: f32 = 1.;
+const EXPLOSION_Z_INDEX: f32 = 0.;
+const EXPLOSION_Z_INDEX_RANGE: f32 = 0.1;
+const SUMMONER_Z_INDEX: f32 = 3.;
+const INDICATOR_Z_INDEX: f32 = 5.;
+const PLAYER_Z_INDEX: f32 = 4.;
+const VIEWPORT_HEIGHT: f32 = 1000.;
+
 static TITLE_FONT: LazyLock<TextFont> = LazyLock::new(|| TextFont {
     font_size: 60.,
     ..default()
@@ -81,14 +151,17 @@ static FONT: LazyLock<TextFont> = LazyLock::new(|| TextFont {
 });
 const SCORE_TEXT_PADDING: f32 = 10.;
 
-const TRACKING_Z_INDEX: f32 = 2.;
-const OBSTACLE_Z_INDEX: f32 = 1.;
-const EXPLOSION_Z_INDEX: f32 = 0.;
-const EXPLOSION_Z_INDEX_RANGE: f32 = 0.1;
-const SUMMONER_Z_INDEX: f32 = 3.;
-const INDICATOR_Z_INDEX: f32 = 5.;
-const PLAYER_Z_INDEX: f32 = 4.;
-const VIEWPORT_HEIGHT: f32 = 1000.;
+const EXPLOSION_PARTICLE_MAX_LIFETIME: f32 = 1.;
+const EXPLOSION_PARTICLE_INITIAL_ALPHA: f32 = 0.7;
+
+const GAME_OVER_SLOWDOWN_REAL_TIME: f32 = 3.;
+const TIME_BEFORE_RESUME: f32 = 3.;
+
+const HIGH_SCORE_KEY: &str = "high_score";
+const VOLUME_KEY: &str = "volume";
+const PHYSICAL_KEYBOARD_LAYOUT_KEY: &str = "physical_keyboard_layout_key";
+const LOGICAL_KEYBOARD_LAYOUT_KEY: &str = "logical_keyboard_layout_key";
+const MAX_DIFFICULTY_KEY: &str = "max_difficulty";
 
 mod palette {
     use bevy::color::Color;
@@ -127,78 +200,6 @@ mod colors {
     pub const UNSELECTED_OUTLINE: Color = palette::GREY;
     pub const VOLUME_BAR: Color = palette::WHITE;
 }
-
-const TRIANGLE_NUM_KEYS: usize = 1;
-const RHOMBUS_NUM_KEYS: usize = 2;
-const PENTAGON_NUM_KEYS: usize = 3;
-const FOE_MAX_NUM_KEYS: usize = PENTAGON_NUM_KEYS;
-const SUMMONER_COLLISION_PADDING: f32 = PLAYER_RADIUS / 2.;
-
-const BOUNCE_DECAY: f32 = 5.;
-const BOUNCE_DURATION: f32 = 0.5;
-
-const NUM_SHAPES: usize = 3;
-const SHAPES: [Shape; NUM_SHAPES] = [Shape::Triangle, Shape::Rhombus, Shape::Pentagon];
-const SPAWNER_FOE_WEIGHTS: [f32; NUM_SHAPES] = [0.1, 0.5, 0.4];
-const PENTAGON_SUMMON_WEIGHTS: [f32; 1] = [1.0];
-const FOE_SPAWN_SINCE_FACTOR: f32 = 5.;
-const FOE_FORCE_SUMMONS: [f32; 3] = [
-    FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[0],
-    FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[1],
-    FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[2],
-];
-
-const FOE_SIZE: f32 = PLAYER_RADIUS * 1.2;
-const TRIANGLE_CENTERING_OFFSET_Y: f32 = PLAYER_RADIUS / 2.5;
-const TRIANGLE_LOCAL_POINTS: [Vec3; 3] = [
-    Vec3::new(0., FOE_SIZE - TRIANGLE_CENTERING_OFFSET_Y, 0.),
-    Vec3::new(FOE_SIZE / 2., -TRIANGLE_CENTERING_OFFSET_Y, 0.),
-    Vec3::new(-FOE_SIZE / 2., -TRIANGLE_CENTERING_OFFSET_Y, 0.),
-];
-const TRIANGLE: Triangle2d = Triangle2d::new(
-    Vec2::new(TRIANGLE_LOCAL_POINTS[0].x, TRIANGLE_LOCAL_POINTS[0].y),
-    Vec2::new(TRIANGLE_LOCAL_POINTS[1].x, TRIANGLE_LOCAL_POINTS[1].y),
-    Vec2::new(TRIANGLE_LOCAL_POINTS[2].x, TRIANGLE_LOCAL_POINTS[2].y),
-);
-const RHOMBUS_LOCAL_POINTS: [Vec3; 4] = [
-    Vec3::new(0., -FOE_SIZE, 0.),
-    Vec3::new(-FOE_SIZE / 1.5, 0., 0.),
-    Vec3::new(FOE_SIZE / 1.5, 0., 0.),
-    Vec3::new(0., FOE_SIZE, 0.),
-];
-const RHOMBUS: Rhombus = Rhombus {
-    half_diagonals: Vec2::new(RHOMBUS_LOCAL_POINTS[2].x, RHOMBUS_LOCAL_POINTS[3].y),
-};
-static PENTAGON_LOCAL_POINTS: LazyLock<[Vec3; 5]> = LazyLock::new(|| {
-    let verts = PENTAGON.vertices(0.);
-    let mut points = [Vec3::ZERO; 5];
-    for (i, v) in verts.into_iter().enumerate() {
-        points[i] = v.extend(0.);
-    }
-    points
-});
-const PENTAGON: RegularPolygon = RegularPolygon {
-    circumcircle: Circle { radius: FOE_SIZE },
-    sides: 5,
-};
-const PLAYER_LOCAL_TRIANGLE: [Vec3; 3] = [
-    Vec3::new(0., 0., 0.),
-    Vec3::new(PLAYER_RADIUS / 2., PLAYER_RADIUS, 0.),
-    Vec3::new(-PLAYER_RADIUS / 2., PLAYER_RADIUS, 0.),
-];
-
-const SPAWN_LOCATION_MULTIPLIER: f32 = 1.2;
-
-const EXPLOSION_PARTICLE_MAX_LIFETIME: f32 = 1.;
-const EXPLOSION_PARTICLE_INITIAL_ALPHA: f32 = 0.7;
-const GAME_OVER_SLOWDOWN_REAL_TIME: f32 = 3.;
-const TIME_BEFORE_RESUME: f32 = 3.;
-
-const HIGH_SCORE_KEY: &str = "high_score";
-const VOLUME_KEY: &str = "volume";
-const PHYSICAL_KEYBOARD_LAYOUT_KEY: &str = "physical_keyboard_layout_key";
-const LOGICAL_KEYBOARD_LAYOUT_KEY: &str = "logical_keyboard_layout_key";
-const MAX_DIFFICULTY_KEY: &str = "max_difficulty";
 
 #[derive(Resource)]
 struct Config {
@@ -613,7 +614,7 @@ struct Summoner {
     since: f32,
     delay: f32,
     foe_dist: WeightedIndex<f32>,
-    rotating: bool,
+    leading_vertex: usize,
 }
 
 #[derive(Clone, Copy)]

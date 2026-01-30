@@ -262,7 +262,7 @@ fn spawn_foe(
             ent_cmds.insert(Summoner {
                 since: 0.,
                 delay: PENTAGON_SPAWN_DELAY,
-                rotating: false,
+                leading_vertex: 0,
                 foe_dist: WeightedIndex::new(PENTAGON_SUMMON_WEIGHTS).unwrap(),
             });
         }

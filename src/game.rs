@@ -522,46 +522,35 @@ pub fn summoner(
 pub fn summoner_foe(
     time: Res<Time<Virtual>>,
     mut query: Query<(&mut Foe, &mut Summoner, &mut Transform)>,
-    window: Single<&Window>,
+    player: Single<&Transform, (With<Player>, Without<Foe>)>,
 ) {
     let dt = time.delta_secs();
-    let viewport_width = viewport_width(&window);
-    let padding_factor = rand::rng().random_range(4.0..5.0);
 
     for (mut foe, mut sum, mut transform) in &mut query {
-        let pos = transform.translation;
         if foe.bounce_timer > 0. {
             bounce_movement(&mut foe, &mut transform, dt);
-        } else if sum.rotating
-            || in_viewport(
-                &pos,
-                viewport_width,
-                Vec2::new(
-                    PLAYER_RADIUS * viewport_width / VIEWPORT_HEIGHT * padding_factor,
-                    PLAYER_RADIUS * VIEWPORT_HEIGHT / viewport_width * padding_factor,
-                ),
-            )
-        {
-            sum.rotating = true;
-            let dir = Vec2::new(-pos.y, pos.x).normalize();
-            let movement = dir * foe.mov_speed() * dt;
-
-            transform.translation.x += movement.x;
-            transform.translation.y += movement.y;
-
-            let angle = movement.y.atan2(movement.x);
-            transform.rotation = transform
-                .rotation
-                .rotate_towards(Quat::from_rotation_z(angle), dt);
-        } else {
-            move_and_rotate_towards(
-                &mut transform,
-                Vec2::ZERO,
-                foe.rot_speed(),
-                foe.mov_speed(),
-                dt,
-            );
         }
+
+        let player_pos = player.translation.truncate();
+        let pos = transform.translation.truncate();
+
+        let rel = pos - player_pos;
+        let dist = rel.length();
+        let radial = (-rel).normalize_or_zero();
+        let tangential = Vec2::new(-rel.y, rel.x).normalize_or_zero();
+
+        let radial_weight =
+            ((dist - SUMMONER_ORBIT_RADIUS) / SUMMONER_ORBIT_RADIUS).clamp(-1.0, 1.0);
+
+        let dir = (radial * radial_weight + tangential).normalize_or_zero();
+        move_nearest_vertex_towards(
+            &mut transform,
+            dir,
+            &mut sum.leading_vertex,
+            foe.rot_speed(),
+            foe.mov_speed(),
+            dt,
+        );
     }
 }
 
@@ -631,6 +620,37 @@ fn move_and_rotate_towards(
 
     let forward_direction = transform.rotation * Vec3::Y;
     transform.translation += forward_direction * mov_speed * dt;
+}
+
+fn move_nearest_vertex_towards(
+    transform: &mut Transform,
+    target_dir: Vec2,
+    leading_vertex: &mut usize,
+    rot_speed: f32,
+    mov_speed: f32,
+    dt: f32,
+) {
+    if target_dir == Vec2::ZERO {
+        return;
+    }
+
+    let dirs = &*PENTAGON_VERTEX_DIRS;
+    let target_local = (transform.rotation.inverse() * target_dir.extend(0.)).xy();
+    if dirs[*leading_vertex].dot(target_local) < COS_MIN_LEADING_VERTEX_ALIGNMENT {
+        *leading_vertex = dirs
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.dot(target_local).total_cmp(&b.dot(target_local)))
+            .unwrap()
+            .0;
+    }
+
+    let v = dirs[*leading_vertex];
+    let snap = Quat::from_rotation_z(target_dir.to_angle() - v.to_angle());
+    transform.rotation = transform.rotation.rotate_towards(snap, rot_speed * dt);
+
+    let move_dir = (transform.rotation * v.extend(0.)).xy();
+    transform.translation += (move_dir * mov_speed * dt).extend(0.);
 }
 
 pub fn projectile(
