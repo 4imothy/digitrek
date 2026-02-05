@@ -16,7 +16,6 @@ pub fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     asset_server: Res<AssetServer>,
-    config: Res<Config>,
 ) {
     let mut launcher_mesh = Mesh::new(
         bevy::render::render_resource::PrimitiveTopology::TriangleStrip,
@@ -53,7 +52,7 @@ pub fn setup(
                     translation: Vec3::new(0., PLAYER_RADIUS / 2., -1.),
                     ..default()
                 },
-                Launcher,
+                PlayerLauncher,
             ));
         })
         .with_children(|cmds| {
@@ -159,13 +158,7 @@ pub fn setup(
     commands.insert_resource(Spawner {
         foe_dist: WeightedIndex::new(SPAWNER_FOE_WEIGHTS).unwrap(),
         foe_delay: FIRST_FOE_SPAWN_DELAY,
-        obstacle_delay: if config.max_difficulty || MAX_DIF || MIN_DELAY {
-            0.
-        } else {
-            FIRST_OBSTACLE_SPAWN_DELAY
-        },
-        foe_spawns_since: [0, 0, 0],
-        obstacle_delay_mu: 0.,
+        foe_spawns_since: [0, 0, 0, 0],
         foe_delay_mu: 0.,
         last_side: 0,
     });
@@ -184,6 +177,7 @@ impl Shape {
             Shape::Triangle => 0,
             Shape::Rhombus => 1,
             Shape::Pentagon => 2,
+            Shape::Hexagon => 3,
         }
     }
 
@@ -192,6 +186,7 @@ impl Shape {
             Shape::Triangle => None,
             Shape::Rhombus => Some(Shape::Triangle),
             Shape::Pentagon => Some(Shape::Rhombus),
+            Shape::Hexagon => Some(Shape::Pentagon),
         }
     }
 }
@@ -236,8 +231,15 @@ impl Foe {
                 msg.write(GameMsg::Despawn(entity));
             } else {
                 self.add_collision(normal);
+                match shape {
+                    Shape::Pentagon => {
+                        msg.write(GameMsg::DespawnChildren(entity));
+                    }
+                    _ => {
+                        msg.write(GameMsg::DespawnText(entity));
+                    }
+                }
                 msg.write(GameMsg::ReplaceShape(entity, shape));
-                msg.write(GameMsg::DespawnChildren(entity));
                 msg.write(GameMsg::AddText(entity));
             }
         } else {
@@ -251,6 +253,7 @@ impl Foe {
             Shape::Triangle => TRIANGLE_MOVEMENT_SPEED,
             Shape::Rhombus => RHOMBUS_MOVEMENT_SPEED,
             Shape::Pentagon => PENTAGON_MOVEMENT_SPEED,
+            Shape::Hexagon => HEXAGON_MOVEMENT_SPEED,
         }
     }
 
@@ -259,6 +262,7 @@ impl Foe {
             Shape::Triangle => TRIANGLE_ROTATION_SPEED,
             Shape::Rhombus => RHOMBUS_ROTATION_SPEED,
             Shape::Pentagon => PENTAGON_ROTATION_SPEED,
+            Shape::Hexagon => HEXAGON_ROTATION_SPEED,
         }
     }
 
@@ -267,6 +271,7 @@ impl Foe {
             Shape::Triangle => 3,
             Shape::Rhombus => 4,
             Shape::Pentagon => 5,
+            Shape::Hexagon => 6,
         }
     }
 }
@@ -292,12 +297,12 @@ pub fn keypress(
     mut msg: MessageWriter<GameMsg>,
     mut audio: MessageWriter<AudioMsg>,
     mut evr_kbd: MessageReader<KeyboardInput>,
-    player: Single<(&mut Player, &Transform), (With<Player>, Without<Launcher>)>,
-    launcher: Single<&mut Transform, (With<Launcher>, Without<Player>)>,
+    player: Single<(&mut Player, &Transform), (With<Player>, Without<PlayerLauncher>)>,
+    launcher: Single<&mut Transform, (With<PlayerLauncher>, Without<Player>)>,
     indicator: Single<Entity, (With<Indicator>, Without<Player>)>,
     mut enemy_query: Query<
         (Entity, &mut Foe, &mut Transform),
-        (Without<Player>, Without<Indicator>, Without<Launcher>),
+        (Without<Player>, Without<Indicator>, Without<PlayerLauncher>),
     >,
     window: Single<&Window>,
     time: ResMut<Time<Virtual>>,
@@ -354,7 +359,7 @@ pub fn keypress(
                                 msg.write(GameMsg::DeSelect(selected));
                                 player.selected = None;
                             }
-                            msg.write(GameMsg::DespawnChildren(selected_entity));
+                            msg.write(GameMsg::DespawnText(selected_entity));
                             msg.write(GameMsg::AddText(selected_entity));
                         } else {
                             audio.write(AudioMsg::UnmatchedKeypress);
@@ -402,7 +407,7 @@ pub fn keypress(
                             }
 
                             ce.next_index += 1;
-                            msg.write(GameMsg::DespawnChildren(e));
+                            msg.write(GameMsg::DespawnText(e));
                             msg.write(GameMsg::AddText(e));
                             msg.write(GameMsg::Projectile(
                                 e,
@@ -554,6 +559,95 @@ pub fn summoner_foe(
     }
 }
 
+pub fn launcher_foe(
+    time: Res<Time<Virtual>>,
+    mut query: Query<(&mut Foe, &mut Launcher, &mut Transform)>,
+) {
+    let dt = time.delta_secs();
+
+    for (mut foe, mut launcher, mut transform) in &mut query {
+        if foe.bounce_timer > 0. {
+            bounce_movement(&mut foe, &mut transform, dt);
+            continue;
+        }
+
+        if launcher.stopped {
+            continue;
+        }
+
+        let pos = transform.translation.xy();
+        let to_target = launcher.target_pos - pos;
+        let dist = to_target.length();
+
+        if dist < foe.mov_speed() * dt {
+            transform.translation.x = launcher.target_pos.x;
+            transform.translation.y = launcher.target_pos.y;
+            launcher.stopped = true;
+        } else {
+            let dir = to_target.normalize();
+            transform.translation += (dir * foe.mov_speed() * dt).extend(0.);
+            transform.rotate_z(foe.rot_speed() * dt);
+        }
+    }
+}
+
+pub fn foe_launcher(
+    time: Res<Time<Virtual>>,
+    mut query: Query<(&mut Launcher, &Transform, &Children)>,
+    launcher_query: Query<&Transform, With<FoeLauncher>>,
+    player: Single<&Transform, With<Player>>,
+    mut msg: MessageWriter<GameMsg>,
+    mut audio: MessageWriter<AudioMsg>,
+) {
+    let dt = time.delta_secs();
+
+    for (mut launcher, hex_transform, children) in &mut query {
+        if !launcher.stopped {
+            continue;
+        }
+
+        launcher.since += dt;
+        if launcher.since >= launcher.delay {
+            launcher.since = 0.;
+
+            for child in children.iter() {
+                if let Ok(launcher_transform) = launcher_query.get(child) {
+                    let tip_local = Vec3::new(HEXAGON_LAUNCHER_LENGTH, 0., 0.);
+                    let tip_world = hex_transform
+                        .transform_point(launcher_transform.transform_point(tip_local));
+                    let direction = (player.translation.xy() - hex_transform.translation.xy())
+                        .normalize_or_zero();
+                    msg.write(GameMsg::SpawnObstacle(tip_world.xy(), direction));
+                    audio.write(AudioMsg::ProjectileLaunch);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+pub fn track_player_for_hexagon(
+    mut query: Query<(&Transform, &Children), With<Launcher>>,
+    mut launcher_query: Query<&mut Transform, (With<FoeLauncher>, Without<Launcher>)>,
+    player: Single<&Transform, (With<Player>, Without<Launcher>, Without<FoeLauncher>)>,
+) {
+    for (hex_transform, children) in &mut query {
+        for child in children.iter() {
+            if let Ok(mut launcher_transform) = launcher_query.get_mut(child) {
+                let player_world = player.translation.xy();
+                let hex_pos = hex_transform.translation.xy();
+                let to_player = player_world - hex_pos;
+                let target_angle = to_player.to_angle();
+
+                let (_, _, hex_rot_z) = hex_transform.rotation.to_euler(EulerRot::XYZ);
+                let local_angle = target_angle - hex_rot_z;
+
+                launcher_transform.rotation = Quat::from_rotation_z(local_angle);
+            }
+        }
+    }
+}
+
 fn in_viewport(pos: &Vec3, viewport_width: f32, padding: Vec2) -> bool {
     pos.x > -viewport_width / 2. + padding.x
         && pos.x < viewport_width / 2. - padding.x
@@ -658,7 +752,13 @@ pub fn projectile(
     mut msg: MessageWriter<GameMsg>,
     mut audio: MessageWriter<AudioMsg>,
     mut enemies_query: Query<
-        (Entity, &mut Foe, &Transform, Option<&mut Summoner>),
+        (
+            Entity,
+            &mut Foe,
+            &Transform,
+            Option<&mut Summoner>,
+            Option<&mut Launcher>,
+        ),
         (Without<Projectile>,),
     >,
     stats: Single<(&mut Stats, &mut Text)>,
@@ -667,7 +767,7 @@ pub fn projectile(
     let (mut stats, mut score_text) = stats.into_inner();
     let mut score_change = false;
     for (projectile_entity, projectile, mut projectile_transform) in &mut projectiles_query {
-        if let Ok((target_entity, mut targeted_enemy, target_transform, spawner)) =
+        if let Ok((target_entity, mut targeted_enemy, target_transform, summoner, launcher_foe)) =
             enemies_query.get_mut(projectile.target)
         {
             let e_points: &[Vec3] = points!(targeted_enemy.shape, target_transform);
@@ -684,8 +784,11 @@ pub fn projectile(
             )
             .is_some()
             {
-                if let Some(mut s) = spawner {
-                    s.since = (s.since - SUMMONER_PROJECTILE_INC_TIME).max(0.);
+                if let Some(mut s) = summoner {
+                    s.since = (s.since - PROJECTILE_INC_TIME).max(0.);
+                }
+                if let Some(mut f) = launcher_foe {
+                    f.since = (f.since - PROJECTILE_INC_TIME).max(0.);
                 }
                 msg.write(GameMsg::Despawn(projectile_entity));
                 if targeted_enemy
@@ -700,7 +803,7 @@ pub fn projectile(
                     stats.alter_score(targeted_enemy.num_points() as isize);
                     score_change = true;
                 } else {
-                    msg.write(GameMsg::DespawnChildren(target_entity));
+                    msg.write(GameMsg::DespawnText(target_entity));
                     targeted_enemy.cleared += 1;
                     msg.write(GameMsg::AddText(target_entity));
                 }
@@ -1060,36 +1163,6 @@ pub fn spawner(
     }
 }
 
-pub fn spawn_obstacles(
-    time: Res<Time<Fixed>>,
-    clock: Res<Clock>,
-    mut msg: MessageWriter<GameMsg>,
-    mut spawner: ResMut<Spawner>,
-    player_transform: Single<&Transform, With<Player>>,
-    window: Single<&Window>,
-    config: ResMut<Config>,
-) {
-    spawner.obstacle_delay -= time.delta_secs();
-
-    if spawner.obstacle_delay <= 0. {
-        let mut rng = rand::rng();
-
-        let width = viewport_width(&window);
-        let pos = spawn_location(width, &mut rng, &mut spawner);
-        msg.write(GameMsg::SpawnObstacle(
-            pos,
-            (player_transform.translation.xy() - pos).normalize(),
-        ));
-
-        spawner.obstacle_delay_mu =
-            obstacle_spawn_delay_mu(clock.0, MAX_DIF || config.max_difficulty);
-
-        spawner.obstacle_delay = rng.random_range(
-            spawner.obstacle_delay_mu - SPAWN_DELTA..spawner.obstacle_delay_mu + SPAWN_DELTA,
-        );
-    }
-}
-
 pub fn reset_collisions(mut enemies: Query<&mut Foe>, mut obstacles: Query<&mut Obstacle>) {
     for mut e in enemies.iter_mut() {
         e.colliding = false;
@@ -1104,7 +1177,7 @@ pub fn track_selected_enemy(
         (Entity, &mut Indicator, &mut Transform),
         (
             With<Indicator>,
-            Without<Launcher>,
+            Without<PlayerLauncher>,
             Without<Targeted>,
             Without<Player>,
         ),
@@ -1113,7 +1186,7 @@ pub fn track_selected_enemy(
         &mut Transform,
         (
             With<Player>,
-            Without<Launcher>,
+            Without<PlayerLauncher>,
             Without<Indicator>,
             Without<Targeted>,
         ),
@@ -1121,7 +1194,7 @@ pub fn track_selected_enemy(
     launcher: Single<
         &mut Transform,
         (
-            With<Launcher>,
+            With<PlayerLauncher>,
             Without<Indicator>,
             Without<Targeted>,
             Without<Player>,
@@ -1132,7 +1205,7 @@ pub fn track_selected_enemy(
         (
             With<Targeted>,
             Without<Indicator>,
-            Without<Launcher>,
+            Without<PlayerLauncher>,
             Without<Player>,
         ),
     >,

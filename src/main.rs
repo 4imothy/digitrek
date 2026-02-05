@@ -25,6 +25,20 @@ const ONE_KEY: bool = cfg!(feature = "one_key");
 const MAX_DIF: bool = cfg!(feature = "max_dif");
 const MIN_DELAY: bool = cfg!(feature = "min_delay");
 
+const PLAYER_RADIUS: f32 = 50.;
+const FOE_SIZE: f32 = PLAYER_RADIUS * 1.2;
+const OBSTACLE_RADIUS: f32 = PLAYER_RADIUS / 3.;
+const PROJECTILE_RADIUS: f32 = PLAYER_RADIUS / 10.;
+const INDICATOR_THICKNESS: f32 = PLAYER_RADIUS / 10.;
+const INDICATOR_RADIUS: f32 = 1.5 * PLAYER_RADIUS;
+const INDICATOR_LONG_RECTANGLE_LENGTH: f32 = INDICATOR_THICKNESS * 3.;
+const EXPLOSION_PARTICLE_RADIUS_LOWER: f32 = PLAYER_RADIUS / 10.;
+const EXPLOSION_PARTICLE_RADIUS_UPPER: f32 = PLAYER_RADIUS / 5.;
+const PLAYER_LAUNCHER_LENGTH: f32 = PLAYER_RADIUS / 1.5;
+const PLAYER_LAUNCHER_WIDTH: f32 = PROJECTILE_RADIUS * 2.;
+const HEXAGON_LAUNCHER_LENGTH: f32 = FOE_SIZE * 1.5;
+const HEXAGON_LAUNCHER_WIDTH: f32 = OBSTACLE_RADIUS * 2.;
+
 const PLAYER_MOVEMENT_SPEED: f32 = 400.;
 const PLAYER_ROTATION_SPEED: f32 = 4.;
 const TRIANGLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 4.;
@@ -32,7 +46,9 @@ const TRIANGLE_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 6.;
 const RHOMBUS_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 6.;
 const RHOMBUS_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 8.;
 const PENTAGON_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 8.;
-const PENTAGON_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 6.;
+const PENTAGON_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 10.;
+const HEXAGON_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 10.;
+const HEXAGON_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 12.;
 const PROJECTILE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED * 4.;
 const OBSTACLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 3.;
 const OBSTACLE_TIME_TO_ENTER_VIEWPORT: f32 = 5.;
@@ -40,31 +56,39 @@ const BOUNCE_DECAY: f32 = 5.;
 const BOUNCE_DURATION: f32 = 0.5;
 
 const FIRST_FOE_SPAWN_DELAY: f32 = 0.;
-const FIRST_OBSTACLE_SPAWN_DELAY: f32 = 10.;
 const SPAWN_DELTA: f32 = 0.3;
 const SPAWN_LOCATION_MULTIPLIER: f32 = 1.2;
-const NUM_SHAPES: usize = 3;
-const SHAPES: [Shape; NUM_SHAPES] = [Shape::Triangle, Shape::Rhombus, Shape::Pentagon];
-const SPAWNER_FOE_WEIGHTS: [f32; NUM_SHAPES] = [0.1, 0.5, 0.4];
+const NUM_SHAPES: usize = 4;
+const SHAPES: [Shape; NUM_SHAPES] = [
+    Shape::Triangle,
+    Shape::Rhombus,
+    Shape::Pentagon,
+    Shape::Hexagon,
+];
+const SPAWNER_FOE_WEIGHTS: [f32; NUM_SHAPES] = [0.1, 0.45, 0.35, 10000000.10];
 const FOE_SPAWN_SINCE_FACTOR: f32 = 5.;
-const FOE_FORCE_SUMMONS: [f32; 3] = [
+const FOE_FORCE_SUMMONS: [f32; NUM_SHAPES] = [
     FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[0],
     FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[1],
     FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[2],
+    FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[3],
 ];
 
 const TRIANGLE_NUM_KEYS: usize = 1;
 const RHOMBUS_NUM_KEYS: usize = 2;
 const PENTAGON_NUM_KEYS: usize = 3;
-const FOE_MAX_NUM_KEYS: usize = PENTAGON_NUM_KEYS;
+const HEXAGON_NUM_KEYS: usize = 4;
+const FOE_MAX_NUM_KEYS: usize = HEXAGON_NUM_KEYS;
+const HEXAGON_OBSTACLE_DELAY: f32 = 4.;
+const HEXAGON_VIEWPORT_PADDING: f32 = FOE_SIZE * 3.;
+const HEXAGON_Z_INDEX: f32 = 3.5;
 const PENTAGON_SUMMON_WEIGHTS: [f32; 1] = [1.0];
 const PENTAGON_SPAWN_DELAY: f32 = 5.;
-const SUMMONER_PROJECTILE_INC_TIME: f32 = 0.1;
+const PROJECTILE_INC_TIME: f32 = 0.1;
 const SUMMONER_COLLISION_PADDING: f32 = PLAYER_RADIUS / 2.;
 const SUMMONER_ORBIT_RADIUS: f32 = PLAYER_RADIUS * 7.;
 const COS_MIN_LEADING_VERTEX_ALIGNMENT: f32 = 0.3;
 
-const FOE_SIZE: f32 = PLAYER_RADIUS * 1.2;
 const TRIANGLE_CENTERING_OFFSET_Y: f32 = PLAYER_RADIUS / 2.5;
 const TRIANGLE_LOCAL_POINTS: [Vec3; 3] = [
     Vec3::new(0., FOE_SIZE - TRIANGLE_CENTERING_OFFSET_Y, 0.),
@@ -99,6 +123,18 @@ const PENTAGON: RegularPolygon = RegularPolygon {
     circumcircle: Circle { radius: FOE_SIZE },
     sides: 5,
 };
+static HEXAGON_LOCAL_POINTS: LazyLock<[Vec3; 6]> = LazyLock::new(|| {
+    let verts = HEXAGON.vertices(0.);
+    let mut points = [Vec3::ZERO; 6];
+    for (i, v) in verts.into_iter().enumerate() {
+        points[i] = v.extend(0.);
+    }
+    points
+});
+const HEXAGON: RegularPolygon = RegularPolygon {
+    circumcircle: Circle { radius: FOE_SIZE },
+    sides: 6,
+};
 const PLAYER_LOCAL_TRIANGLE: [Vec3; 3] = [
     Vec3::new(0., 0., 0.),
     Vec3::new(PLAYER_RADIUS / 2., PLAYER_RADIUS, 0.),
@@ -112,25 +148,6 @@ fn spawner_foe_delay_mu(x: f32, max_dif: bool) -> f32 {
         7. * f32::exp(-0.07 * if max_dif { f32::MAX } else { x }) + 0.5
     }
 }
-
-fn obstacle_spawn_delay_mu(x: f32, max_dif: bool) -> f32 {
-    if MIN_DELAY {
-        SPAWN_DELTA * 5.
-    } else {
-        5. * f32::exp(-0.02 * if max_dif { f32::MAX } else { x }) + 3.
-    }
-}
-
-const PLAYER_RADIUS: f32 = 50.;
-const OBSTACLE_RADIUS: f32 = PLAYER_RADIUS / 1.5;
-const PROJECTILE_RADIUS: f32 = PLAYER_RADIUS / 10.;
-const EXPLOSION_PARTICLE_RADIUS_LOWER: f32 = PLAYER_RADIUS / 10.;
-const EXPLOSION_PARTICLE_RADIUS_UPPER: f32 = PLAYER_RADIUS / 5.;
-const PLAYER_LAUNCHER_LENGTH: f32 = PLAYER_RADIUS / 1.5;
-const PLAYER_LAUNCHER_WIDTH: f32 = PROJECTILE_RADIUS * 2.;
-const INDICATOR_THICKNESS: f32 = PLAYER_RADIUS / 10.;
-const INDICATOR_RADIUS: f32 = 1.5 * PLAYER_RADIUS;
-const INDICATOR_LONG_RECTANGLE_LENGTH: f32 = INDICATOR_THICKNESS * 3.;
 
 const TRACKING_Z_INDEX: f32 = 2.;
 const OBSTACLE_Z_INDEX: f32 = 1.;
@@ -175,6 +192,7 @@ mod palette {
     pub const CYAN: Color = Color::srgb(0., 0.5, 0.5);
     pub const GREY: Color = Color::srgb(0.5, 0.5, 0.5);
     pub const CHARCOAL: Color = Color::srgb(0.28, 0.28, 0.28);
+    pub const ORANGE: Color = Color::srgb(1., 0.5, 0.);
 }
 
 mod colors {
@@ -184,6 +202,7 @@ mod colors {
     pub const TRIANGLE: Color = palette::RED;
     pub const RHOMBUS: Color = palette::BLUE;
     pub const PENTAGON: Color = palette::MAGENTA;
+    pub const HEXAGON: Color = palette::ORANGE;
     pub const INDICATOR: Color = palette::YELLOW;
     pub const PROJECTILE: Color = palette::WHITE;
     pub const OBSTACLE: Color = palette::CYAN;
@@ -466,7 +485,6 @@ fn game_plugin(app: &mut App) {
                 game::player_collisions,
                 game::obstacle_collisions,
                 game::spawner,
-                game::spawn_obstacles,
                 game::track_selected_enemy,
                 game::update_clock,
             )
@@ -481,6 +499,9 @@ fn game_plugin(app: &mut App) {
                 game::projectile,
                 game::tracking_foe,
                 game::summoner_foe,
+                game::launcher_foe,
+                game::foe_launcher,
+                game::track_player_for_hexagon,
                 game::summoner,
                 game::obstacle,
                 game::explosion_system,
@@ -517,6 +538,7 @@ macro_rules! points {
             Shape::Triangle => &TRIANGLE_LOCAL_POINTS.map(|p| $transform.transform_point(p)),
             Shape::Rhombus => &RHOMBUS_LOCAL_POINTS.map(|p| $transform.transform_point(p)),
             Shape::Pentagon => &PENTAGON_LOCAL_POINTS.map(|p| $transform.transform_point(p)),
+            Shape::Hexagon => &HEXAGON_LOCAL_POINTS.map(|p| $transform.transform_point(p)),
         }
     }};
 }
@@ -580,6 +602,7 @@ struct MovementControls {
 enum GameMsg {
     Explosion(Vec2),
     Despawn(Entity),
+    DespawnText(Entity),
     DespawnChildren(Entity),
     ReplaceShape(Entity, Shape),
     AddText(Entity),
@@ -604,8 +627,6 @@ struct Spawner {
     foe_spawns_since: [usize; NUM_SHAPES],
     foe_delay: f32,
     foe_delay_mu: f32,
-    obstacle_delay: f32,
-    obstacle_delay_mu: f32,
     last_side: usize,
 }
 
@@ -617,15 +638,30 @@ struct Summoner {
     leading_vertex: usize,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum Shape {
     Triangle,
     Rhombus,
     Pentagon,
+    Hexagon,
 }
 
 #[derive(Component)]
 struct Tracking;
+
+#[derive(Component)]
+struct Launcher {
+    since: f32,
+    delay: f32,
+    target_pos: Vec2,
+    stopped: bool,
+}
+
+#[derive(Component)]
+struct FoeLauncher;
+
+#[derive(Component)]
+struct EnemyText;
 
 #[derive(Component)]
 struct Targeted;
@@ -639,7 +675,7 @@ struct Indicator {
 }
 
 #[derive(Component)]
-struct Launcher;
+struct PlayerLauncher;
 
 #[derive(Component)]
 struct Foe {
@@ -654,9 +690,6 @@ struct Foe {
     colliding: bool,
     spawned_by: Option<Entity>,
 }
-
-#[derive(Component)]
-struct EnemyText;
 
 #[derive(Component)]
 struct Slowdown {

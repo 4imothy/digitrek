@@ -36,11 +36,15 @@ pub fn on_msg(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut msg: MessageReader<GameMsg>,
     enemies: Query<&Foe, Without<ToDespawn>>,
+    children_query: Query<&Children>,
+    enemy_text_query: Query<(), With<EnemyText>>,
     mut config: ResMut<Config>,
     stats: Single<&mut Stats>,
     mut pkv: ResMut<PkvStore>,
+    window: Single<&Window>,
 ) {
     let mut rng = rand::rng();
+    let viewport_width = window.width() * VIEWPORT_HEIGHT / window.height();
     for msg in msg.read() {
         match msg {
             GameMsg::Explosion(position) => {
@@ -54,6 +58,15 @@ pub fn on_msg(
             }
             GameMsg::Despawn(entity) => {
                 commands.entity(*entity).insert(ToDespawn);
+            }
+            GameMsg::DespawnText(entity) => {
+                if let Ok(children) = children_query.get(*entity) {
+                    for child in children.iter() {
+                        if enemy_text_query.contains(child) {
+                            commands.entity(child).try_despawn();
+                        }
+                    }
+                }
             }
             GameMsg::DespawnChildren(entity) => {
                 commands.entity(*entity).despawn_related::<Children>();
@@ -86,6 +99,7 @@ pub fn on_msg(
                     *rot,
                     *spawned_by,
                     &config,
+                    viewport_width,
                 );
             }
             GameMsg::SpawnObstacle(pos, direction) => {
@@ -226,11 +240,19 @@ fn spawn_foe(
     rot: Option<f32>,
     spawned_by: Option<Entity>,
     config: &Config,
+    viewport_width: f32,
 ) {
     let (mesh, color, num_keys) = match shape {
         Shape::Triangle => (meshes.add(TRIANGLE), colors::TRIANGLE, TRIANGLE_NUM_KEYS),
         Shape::Rhombus => (meshes.add(RHOMBUS), colors::RHOMBUS, RHOMBUS_NUM_KEYS),
         Shape::Pentagon => (meshes.add(PENTAGON), colors::PENTAGON, PENTAGON_NUM_KEYS),
+        Shape::Hexagon => (meshes.add(HEXAGON), colors::HEXAGON, HEXAGON_NUM_KEYS),
+    };
+
+    let z_index = match shape {
+        Shape::Triangle | Shape::Rhombus => TRACKING_Z_INDEX,
+        Shape::Pentagon => SUMMONER_Z_INDEX,
+        Shape::Hexagon => HEXAGON_Z_INDEX,
     };
 
     let keys: [char; FOE_MAX_NUM_KEYS] = std::array::from_fn(|_| {
@@ -244,11 +266,7 @@ fn spawn_foe(
     let mut ent_cmds = commands.spawn((
         Mesh2d(mesh),
         Transform {
-            translation: pos.extend(if matches!(shape, Shape::Triangle | Shape::Rhombus) {
-                TRACKING_Z_INDEX
-            } else {
-                SUMMONER_Z_INDEX
-            }),
+            translation: pos.extend(z_index),
             rotation: rot.map(Quat::from_rotation_z).unwrap_or_default(),
             ..default()
         },
@@ -264,6 +282,38 @@ fn spawn_foe(
                 delay: PENTAGON_SPAWN_DELAY,
                 leading_vertex: 0,
                 foe_dist: WeightedIndex::new(PENTAGON_SUMMON_WEIGHTS).unwrap(),
+            });
+        }
+        Shape::Hexagon => {
+            let half_w = viewport_width / 2. - HEXAGON_VIEWPORT_PADDING;
+            let half_h = VIEWPORT_HEIGHT / 2. - HEXAGON_VIEWPORT_PADDING;
+            let target_pos = Vec2::new(pos.x.clamp(-half_w, half_w), pos.y.clamp(-half_h, half_h));
+            ent_cmds.insert(Launcher {
+                since: 0.,
+                delay: HEXAGON_OBSTACLE_DELAY,
+                target_pos,
+                stopped: false,
+            });
+            let mut launcher_mesh = Mesh::new(
+                bevy::render::render_resource::PrimitiveTopology::TriangleStrip,
+                RenderAssetUsages::default(),
+            );
+            let vertices = [
+                [0., -HEXAGON_LAUNCHER_WIDTH / 2., 0.],
+                [0., HEXAGON_LAUNCHER_WIDTH / 2., 0.],
+                [HEXAGON_LAUNCHER_LENGTH, -HEXAGON_LAUNCHER_WIDTH / 2., 0.],
+                [HEXAGON_LAUNCHER_LENGTH, HEXAGON_LAUNCHER_WIDTH / 2., 0.],
+            ];
+            launcher_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices.to_vec());
+            launcher_mesh.insert_indices(bevy::mesh::Indices::U32(vec![0, 1, 3, 0, 2, 3]));
+
+            ent_cmds.with_children(|cmd| {
+                cmd.spawn((
+                    FoeLauncher,
+                    Mesh2d(meshes.add(launcher_mesh)),
+                    MeshMaterial2d(materials.add(colors::LAUNCHER)),
+                    Transform::from_xyz(0., 0., -1.),
+                ));
             });
         }
     }
@@ -299,12 +349,25 @@ fn replace_shape(
     let (mesh, color) = match shape {
         Shape::Triangle => (meshes.add(TRIANGLE), materials.add(colors::TRIANGLE)),
         Shape::Rhombus => (meshes.add(RHOMBUS), materials.add(colors::RHOMBUS)),
-        Shape::Pentagon => unreachable!(),
+        Shape::Pentagon => (meshes.add(PENTAGON), materials.add(colors::PENTAGON)),
+        Shape::Hexagon => unreachable!(),
     };
     let mut ent_cmds = commands.entity(entity);
-    if let Shape::Rhombus = shape {
-        ent_cmds.remove::<Summoner>();
-        ent_cmds.insert(Tracking);
+    match shape {
+        Shape::Rhombus => {
+            ent_cmds.remove::<Summoner>();
+            ent_cmds.insert(Tracking);
+        }
+        Shape::Pentagon => {
+            ent_cmds.remove::<Launcher>();
+            ent_cmds.insert(Summoner {
+                since: 0.,
+                delay: PENTAGON_SPAWN_DELAY,
+                leading_vertex: 0,
+                foe_dist: WeightedIndex::new(PENTAGON_SUMMON_WEIGHTS).unwrap(),
+            });
+        }
+        _ => {}
     }
     ent_cmds.insert(MeshMaterial2d(color)).insert(Mesh2d(mesh));
 }
