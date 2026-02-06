@@ -51,9 +51,9 @@ const HEXAGON_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 10.;
 const HEXAGON_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 12.;
 const PROJECTILE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED * 4.;
 const OBSTACLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 3.;
-const OBSTACLE_TIME_TO_ENTER_VIEWPORT: f32 = 5.;
 const BOUNCE_DECAY: f32 = 5.;
 const BOUNCE_DURATION: f32 = 0.5;
+const BOUNCE_MULTIPLIER: f32 = 1.5;
 
 const FIRST_FOE_SPAWN_DELAY: f32 = 0.;
 const SPAWN_DELTA: f32 = 0.3;
@@ -65,7 +65,7 @@ const SHAPES: [Shape; NUM_SHAPES] = [
     Shape::Pentagon,
     Shape::Hexagon,
 ];
-const SPAWNER_FOE_WEIGHTS: [f32; NUM_SHAPES] = [0.1, 0.45, 0.35, 10000000.10];
+const SPAWNER_FOE_WEIGHTS: [f32; NUM_SHAPES] = [0.35, 0.30, 0.20, 0.15];
 const FOE_SPAWN_SINCE_FACTOR: f32 = 5.;
 const FOE_FORCE_SUMMONS: [f32; NUM_SHAPES] = [
     FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[0],
@@ -689,6 +689,7 @@ struct Foe {
     bounce_timer: f32,
     colliding: bool,
     spawned_by: Option<Entity>,
+    entered_viewport: bool,
 }
 
 #[derive(Component)]
@@ -699,8 +700,6 @@ struct Slowdown {
 #[derive(Component)]
 struct Obstacle {
     direction: Vec2,
-    time_to_enter_viewport: f32,
-    entered_view: bool,
     colliding: bool,
 }
 
@@ -746,6 +745,7 @@ impl Foe {
             bounce_timer: 0.,
             colliding: false,
             spawned_by,
+            entered_viewport: false,
         }
     }
 }

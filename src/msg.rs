@@ -106,8 +106,6 @@ pub fn on_msg(
                 commands.spawn((
                     Obstacle {
                         direction: *direction,
-                        entered_view: false,
-                        time_to_enter_viewport: OBSTACLE_TIME_TO_ENTER_VIEWPORT,
                         colliding: false,
                     },
                     Mesh2d(meshes.add(Circle::new(OBSTACLE_RADIUS))),

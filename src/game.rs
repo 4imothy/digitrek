@@ -209,11 +209,11 @@ fn explosion_in_viewport(
 
 impl Foe {
     pub fn add_collision(&mut self, collision_normal: Vec2) {
-        self.bounce_velocity = Some(collision_normal * self.mov_speed());
+        self.bounce_velocity = Some(collision_normal * self.mov_speed() * BOUNCE_MULTIPLIER);
         self.bounce_timer = BOUNCE_DURATION;
     }
 
-    pub fn collision_with_enemy(
+    pub fn collision(
         &mut self,
         msg: &mut MessageWriter<GameMsg>,
         audio: &mut MessageWriter<AudioMsg>,
@@ -304,7 +304,6 @@ pub fn keypress(
         (Entity, &mut Foe, &mut Transform),
         (Without<Player>, Without<Indicator>, Without<PlayerLauncher>),
     >,
-    window: Single<&Window>,
     time: ResMut<Time<Virtual>>,
     stats: Single<&mut Stats>,
     config: Res<Config>,
@@ -314,8 +313,6 @@ pub fn keypress(
         evr_kbd.clear();
         return;
     }
-    let viewport_width = viewport_width(&window);
-
     let mut found_selected = false;
     let mut launcher_transform = launcher.into_inner();
     for ev in evr_kbd.read() {
@@ -374,11 +371,7 @@ pub fn keypress(
 
                         for (entity, enemy, enemy_transform) in enemy_query.iter_mut() {
                             if enemy.next_index < enemy.orig_len
-                                && in_viewport(
-                                    &enemy_transform.translation,
-                                    viewport_width,
-                                    Vec2::ZERO,
-                                )
+                                && enemy.entered_viewport
                                 && key == enemy.keys[enemy.next_index]
                             {
                                 let distance = player_transform
@@ -528,10 +521,16 @@ pub fn summoner_foe(
     time: Res<Time<Virtual>>,
     mut query: Query<(&mut Foe, &mut Summoner, &mut Transform)>,
     player: Single<&Transform, (With<Player>, Without<Foe>)>,
+    window: Single<&Window>,
 ) {
     let dt = time.delta_secs();
+    let viewport_width = viewport_width(&window);
 
     for (mut foe, mut sum, mut transform) in &mut query {
+        if !foe.entered_viewport && in_viewport(&transform.translation, viewport_width, Vec2::ZERO)
+        {
+            foe.entered_viewport = true;
+        }
         if foe.bounce_timer > 0. {
             bounce_movement(&mut foe, &mut transform, dt);
         }
@@ -562,10 +561,16 @@ pub fn summoner_foe(
 pub fn launcher_foe(
     time: Res<Time<Virtual>>,
     mut query: Query<(&mut Foe, &mut Launcher, &mut Transform)>,
+    window: Single<&Window>,
 ) {
     let dt = time.delta_secs();
+    let viewport_width = viewport_width(&window);
 
     for (mut foe, mut launcher, mut transform) in &mut query {
+        if !foe.entered_viewport && in_viewport(&transform.translation, viewport_width, Vec2::ZERO)
+        {
+            foe.entered_viewport = true;
+        }
         if foe.bounce_timer > 0. {
             bounce_movement(&mut foe, &mut transform, dt);
             continue;
@@ -659,10 +664,16 @@ pub fn tracking_foe(
     time: Res<Time<Virtual>>,
     mut query: Query<(&mut Foe, &mut Transform), (With<Tracking>, Without<Player>)>,
     player_transform: Single<&Transform, With<Player>>,
+    window: Single<&Window>,
 ) {
     let player_translation = player_transform.translation.xy();
+    let viewport_width = viewport_width(&window);
 
     for (mut foe, mut transform) in &mut query {
+        if !foe.entered_viewport && in_viewport(&transform.translation, viewport_width, Vec2::ZERO)
+        {
+            foe.entered_viewport = true;
+        }
         let dt = time.delta_secs();
         if foe.bounce_timer > 0. {
             bounce_movement(&mut foe, &mut transform, dt);
@@ -1002,7 +1013,7 @@ pub fn enemy_collisions(
             && let Some((normal, a_to_b)) = collide(points_a, points_b, None)
         {
             if !enemy_a.colliding {
-                enemy_a.collision_with_enemy(
+                enemy_a.collision(
                     &mut msg,
                     &mut audio,
                     entity_a,
@@ -1012,7 +1023,7 @@ pub fn enemy_collisions(
                 );
             }
             if !enemy_b.colliding {
-                enemy_b.collision_with_enemy(
+                enemy_b.collision(
                     &mut msg,
                     &mut audio,
                     entity_b,
@@ -1252,7 +1263,7 @@ pub fn obstacle_collisions(
                     e_points,
                 )
             {
-                e.collision_with_enemy(
+                e.collision(
                     &mut msg,
                     &mut audio,
                     e_ent,
@@ -1301,7 +1312,7 @@ pub fn obstacle(
 ) {
     let viewport_width = viewport_width(&window);
     let dt = time.delta_secs();
-    for (ent, mut o, mut transform) in obstacles.iter_mut() {
+    for (ent, o, mut transform) in obstacles.iter_mut() {
         let in_viewport = in_viewport(
             &transform.translation,
             viewport_width,
@@ -1309,16 +1320,8 @@ pub fn obstacle(
         );
         transform.translation.x += o.direction.x * OBSTACLE_MOVEMENT_SPEED * dt;
         transform.translation.y += o.direction.y * OBSTACLE_MOVEMENT_SPEED * dt;
-        if o.entered_view && !in_viewport {
+        if !in_viewport {
             msg.write(GameMsg::Despawn(ent));
-        } else {
-            o.entered_view = in_viewport;
-            if !o.entered_view {
-                o.time_to_enter_viewport -= dt;
-                if o.time_to_enter_viewport <= 0. {
-                    msg.write(GameMsg::Despawn(ent));
-                }
-            }
         }
     }
 }
