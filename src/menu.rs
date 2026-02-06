@@ -6,13 +6,11 @@ use core::f32;
 
 const VOLUME_LABEL_PREFIX: &str = "volume:";
 
-#[derive(Component, Clone, Copy, PartialEq)]
+#[derive(Component, PartialEq, Clone, Copy)]
 pub enum Label {
-    Game,
+    Play,
     Settings,
-    SettingsBack,
     Credits,
-    CreditsBack,
     Volume,
     PhysicalKeyboardLayout,
     PhysicalQwerty,
@@ -30,13 +28,10 @@ pub enum Label {
     MistypeSound,
     Source,
     Help,
-    HelpBack,
     Resume,
-    PauseBack,
     GameSettings,
-    GameSettingsBack,
     PlayAgain,
-    EndBack,
+    Back,
     Quit,
 }
 
@@ -64,22 +59,24 @@ impl Label {
 }
 
 impl KeyboardLayouts {
-    fn right(&self, logical: bool) -> Option<Label> {
+    fn right(&self, logical: bool) -> Label {
         match (self, logical) {
-            (KeyboardLayouts::Qwerty, true) => Some(Label::LogicalDvorak),
-            (KeyboardLayouts::Qwerty, false) => Some(Label::PhysicalDvorak),
-            (KeyboardLayouts::Dvorak, true) => Some(Label::LogicalColemak),
-            (KeyboardLayouts::Dvorak, false) => Some(Label::PhysicalColemak),
-            (KeyboardLayouts::Colemak, _) => None,
+            (KeyboardLayouts::Qwerty, true) => Label::LogicalDvorak,
+            (KeyboardLayouts::Qwerty, false) => Label::PhysicalDvorak,
+            (KeyboardLayouts::Dvorak, true) => Label::LogicalColemak,
+            (KeyboardLayouts::Dvorak, false) => Label::PhysicalColemak,
+            (KeyboardLayouts::Colemak, true) => Label::LogicalQwerty,
+            (KeyboardLayouts::Colemak, false) => Label::PhysicalQwerty,
         }
     }
-    fn left(&self, logical: bool) -> Option<Label> {
+    fn left(&self, logical: bool) -> Label {
         match (self, logical) {
-            (KeyboardLayouts::Dvorak, true) => Some(Label::LogicalQwerty),
-            (KeyboardLayouts::Dvorak, false) => Some(Label::PhysicalQwerty),
-            (KeyboardLayouts::Colemak, true) => Some(Label::LogicalDvorak),
-            (KeyboardLayouts::Colemak, false) => Some(Label::PhysicalDvorak),
-            (KeyboardLayouts::Qwerty, _) => None,
+            (KeyboardLayouts::Dvorak, true) => Label::LogicalQwerty,
+            (KeyboardLayouts::Dvorak, false) => Label::PhysicalQwerty,
+            (KeyboardLayouts::Colemak, true) => Label::LogicalDvorak,
+            (KeyboardLayouts::Colemak, false) => Label::PhysicalDvorak,
+            (KeyboardLayouts::Qwerty, true) => Label::LogicalColemak,
+            (KeyboardLayouts::Qwerty, false) => Label::PhysicalColemak,
         }
     }
 }
@@ -135,7 +132,7 @@ pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
             ));
 
             for (action, label) in [
-                (Label::Game, "play"),
+                (Label::Play, "play"),
                 (Label::Help, "help"),
                 (Label::Settings, "settings"),
                 (Label::Credits, "credits"),
@@ -151,7 +148,7 @@ pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
                 entity.with_children(|parent| {
                     parent.spawn((Text::new(label), FONT.clone(), TextColor(colors::TEXT_NEXT)));
                 });
-                if let Label::Game = action {
+                if let Label::Play = action {
                     entity.insert(Selected);
                 }
             }
@@ -207,6 +204,8 @@ pub fn mouse(
     mut max_difficulty_toggle: Query<&mut BackgroundColor, With<MaxDifToggle>>,
     mut app_exit_msg: MessageWriter<AppExit>,
     mut pause_msg: MessageWriter<PauseMsg>,
+    screen: Res<State<Screen>>,
+    game_screen: Res<State<GameScreen>>,
     mut next_screen: ResMut<NextState<Screen>>,
     mut next_game_screen: ResMut<NextState<GameScreen>>,
     mut vtime: ResMut<Time<Virtual>>,
@@ -220,6 +219,8 @@ pub fn mouse(
                 &mut commands,
                 &mut app_exit_msg,
                 &mut pause_msg,
+                &screen,
+                &game_screen,
                 &mut next_screen,
                 &mut next_game_screen,
                 &active,
@@ -245,6 +246,8 @@ fn do_action(
     commands: &mut Commands,
     app_exit_msg: &mut MessageWriter<AppExit>,
     pause_msg: &mut MessageWriter<PauseMsg>,
+    screen: &State<Screen>,
+    game_screen: &State<GameScreen>,
     next_screen: &mut ResMut<NextState<Screen>>,
     next_game_screen: &mut ResMut<NextState<GameScreen>>,
     active: &Query<(Entity, &Label), With<Active>>,
@@ -258,23 +261,37 @@ fn do_action(
         Label::Quit => {
             app_exit_msg.write(AppExit::Success);
         }
-        Label::Game => {
+        Label::Play => {
             next_screen.set(Screen::Game);
         }
         Label::Settings => next_screen.set(Screen::Settings),
         Label::Help => next_screen.set(Screen::Help),
         Label::Credits => next_screen.set(Screen::Credits),
-        Label::SettingsBack => {
-            next_screen.set(Screen::MainMenu);
-            let _ = pkv.set(VOLUME_KEY, &config.volume);
-            let _ = pkv.set(
-                PHYSICAL_KEYBOARD_LAYOUT_KEY,
-                &config.physical_keyboard_layout,
-            );
-            let _ = pkv.set(LOGICAL_KEYBOARD_LAYOUT_KEY, &config.logical_keyboard_layout);
-            let _ = pkv.set(MAX_DIFFICULTY_KEY, &config.max_difficulty);
-        }
-        Label::CreditsBack | Label::HelpBack => next_screen.set(Screen::MainMenu),
+        Label::Back => match (**screen, **game_screen) {
+            (Screen::Settings, _) => {
+                next_screen.set(Screen::MainMenu);
+                let _ = pkv.set(VOLUME_KEY, &config.volume);
+                let _ = pkv.set(
+                    PHYSICAL_KEYBOARD_LAYOUT_KEY,
+                    &config.physical_keyboard_layout,
+                );
+                let _ = pkv.set(LOGICAL_KEYBOARD_LAYOUT_KEY, &config.logical_keyboard_layout);
+                let _ = pkv.set(MAX_DIFFICULTY_KEY, &config.max_difficulty);
+            }
+            (Screen::Credits | Screen::Help, _) => {
+                next_screen.set(Screen::MainMenu);
+            }
+            (Screen::Game, GameScreen::Settings) => {
+                let _ = pkv.set(VOLUME_KEY, &config.volume);
+                next_game_screen.set(GameScreen::Pause);
+            }
+            (Screen::Game, GameScreen::Pause | GameScreen::End) => {
+                vtime.unpause();
+                vtime.set_relative_speed(1.);
+                next_screen.set(Screen::MainMenu);
+            }
+            _ => {}
+        },
         Label::PhysicalQwerty | Label::PhysicalDvorak | Label::PhysicalColemak => {
             switch_keyboard_layout(
                 commands,
@@ -312,17 +329,8 @@ fn do_action(
         Label::Resume => {
             pause_msg.write(PauseMsg::TogglePause);
         }
-        Label::PauseBack | Label::EndBack => {
-            vtime.unpause();
-            vtime.set_relative_speed(1.);
-            next_screen.set(Screen::MainMenu);
-        }
         Label::GameSettings => {
             next_game_screen.set(GameScreen::Settings);
-        }
-        Label::GameSettingsBack => {
-            let _ = pkv.set(VOLUME_KEY, &config.volume);
-            next_game_screen.set(GameScreen::Pause);
         }
         Label::PlayAgain => {
             vtime.unpause();
@@ -371,7 +379,7 @@ pub fn pause_setup(mut commands: Commands) {
             for (action, label) in [
                 (Label::Resume, "resume"),
                 (Label::GameSettings, "settings"),
-                (Label::PauseBack, "exit"),
+                (Label::Back, "exit"),
             ] {
                 let mut entity = cmd.spawn((
                     Button,
@@ -410,7 +418,7 @@ pub fn end_setup(mut commands: Commands, stats: Single<&mut Stats>) {
                 TextLayout::new_with_justify(Justify::Center),
                 FONT.clone(),
             ));
-            for (action, label) in [(Label::PlayAgain, "play again"), (Label::EndBack, "exit")] {
+            for (action, label) in [(Label::PlayAgain, "play again"), (Label::Back, "exit")] {
                 let mut entity = cmd.spawn((
                     Button,
                     Node { ..button() },
@@ -479,7 +487,7 @@ pub fn help_setup(mut commands: Commands, config: Res<Config>) {
             ));
             screen
                 .spawn((
-                    Label::HelpBack,
+                    Label::Back,
                     Button,
                     BorderColor::all(colors::UNSELECTED_OUTLINE),
                     Node { ..button() },
@@ -514,7 +522,7 @@ pub fn game_settings_setup(mut commands: Commands, config: Res<Config>) {
             add_volume(screen, &config);
             screen
                 .spawn((
-                    Label::GameSettingsBack,
+                    Label::Back,
                     Button,
                     BorderColor::all(colors::UNSELECTED_OUTLINE),
                     Node { ..button() },
@@ -592,6 +600,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                 screen
                     .spawn((
                         group_label,
+                        Button,
                         Node {
                             flex_direction: FlexDirection::Row,
                             ..button()
@@ -665,7 +674,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
 
             screen
                 .spawn((
-                    Label::SettingsBack,
+                    Label::Back,
                     Button,
                     BorderColor::all(colors::UNSELECTED_OUTLINE),
                     Node { ..button() },
@@ -752,7 +761,7 @@ pub fn credits_setup(mut commands: Commands) {
             }
             screen
                 .spawn((
-                    Label::CreditsBack,
+                    Label::Back,
                     Button,
                     BorderColor::all(colors::UNSELECTED_OUTLINE),
                     Node { ..button() },
@@ -824,7 +833,7 @@ fn switch_keyboard_layout(
     }
 }
 
-pub fn keypress(
+pub fn keypress_navigate(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     mut config: ResMut<Config>,
@@ -833,115 +842,127 @@ pub fn keypress(
     selected: Single<(Entity, &Label), With<Selected>>,
     elements: Query<(Entity, &Label)>,
     keyboard_options: Query<(Entity, &Label), With<KeyboardOption>>,
-    mut app_exit_msg: MessageWriter<AppExit>,
-    mut pause_msg: MessageWriter<PauseMsg>,
     screen: Res<State<Screen>>,
-    mut max_difficulty_toggle: Query<&mut BackgroundColor, With<MaxDifToggle>>,
-    mut vtime: ResMut<Time<Virtual>>,
-    mut next_screen: ResMut<NextState<Screen>>,
-    mut next_game_screen: ResMut<NextState<GameScreen>>,
-    mut pkv: ResMut<PkvStore>,
+    game_screen: Res<State<GameScreen>>,
+    key: Res<KeyState>,
 ) {
     let (selected_ent, selected_label) = *selected;
-    if keys.any_just_pressed([KeyCode::ArrowRight, config.right()]) {
+
+    let nav_keys_right = [KeyCode::ArrowRight, config.right()];
+    let nav_keys_left = [KeyCode::ArrowLeft, config.left()];
+    let nav_keys_down = [KeyCode::ArrowDown, config.down()];
+    let nav_keys_up = [KeyCode::ArrowUp, config.up()];
+
+    let right_active =
+        keys.any_just_pressed(nav_keys_right) || (key.should_repeat && key.h == Some(true));
+    let left_active =
+        keys.any_just_pressed(nav_keys_left) || (key.should_repeat && key.h == Some(false));
+    let down_active =
+        keys.any_just_pressed(nav_keys_down) || (key.should_repeat && key.v == Some(true));
+    let up_active =
+        keys.any_just_pressed(nav_keys_up) || (key.should_repeat && key.v == Some(false));
+
+    if right_active {
         match selected_label {
             Label::Volume => config.inc_vol(5, &mut global_volume),
             Label::PhysicalKeyboardLayout => {
-                if let Some(next) = config.physical_keyboard_layout.right(false) {
-                    switch_keyboard_layout(
-                        &mut commands,
-                        &active,
-                        &keyboard_options,
-                        next,
-                        *selected_label,
-                        &mut config,
-                    );
-                }
+                switch_keyboard_layout(
+                    &mut commands,
+                    &active,
+                    &keyboard_options,
+                    config.physical_keyboard_layout.right(false),
+                    *selected_label,
+                    &mut config,
+                );
             }
             Label::LogicalKeyboardLayout => {
-                if let Some(next) = config.logical_keyboard_layout.right(true) {
-                    switch_keyboard_layout(
-                        &mut commands,
-                        &active,
-                        &keyboard_options,
-                        next,
-                        *selected_label,
-                        &mut config,
-                    );
-                }
+                switch_keyboard_layout(
+                    &mut commands,
+                    &active,
+                    &keyboard_options,
+                    config.logical_keyboard_layout.right(true),
+                    *selected_label,
+                    &mut config,
+                );
             }
             _ => {}
         }
-    } else if keys.any_just_pressed([KeyCode::ArrowLeft, config.left()]) {
+    }
+    if left_active {
         match selected_label {
             Label::Volume => config.dec_vol(5, &mut global_volume),
             Label::PhysicalKeyboardLayout => {
-                if let Some(next) = config.physical_keyboard_layout.left(false) {
-                    switch_keyboard_layout(
-                        &mut commands,
-                        &active,
-                        &keyboard_options,
-                        next,
-                        *selected_label,
-                        &mut config,
-                    );
-                }
+                switch_keyboard_layout(
+                    &mut commands,
+                    &active,
+                    &keyboard_options,
+                    config.physical_keyboard_layout.left(false),
+                    *selected_label,
+                    &mut config,
+                );
             }
             Label::LogicalKeyboardLayout => {
-                if let Some(next) = config.logical_keyboard_layout.left(true) {
-                    switch_keyboard_layout(
-                        &mut commands,
-                        &active,
-                        &keyboard_options,
-                        next,
-                        *selected_label,
-                        &mut config,
-                    );
-                }
+                switch_keyboard_layout(
+                    &mut commands,
+                    &active,
+                    &keyboard_options,
+                    config.logical_keyboard_layout.left(true),
+                    *selected_label,
+                    &mut config,
+                );
             }
             _ => {}
         }
     }
-    if keys.just_pressed(KeyCode::Escape) {
-        match **screen {
-            Screen::Settings | Screen::Credits | Screen::Help => next_screen.set(Screen::MainMenu),
-            _ => {}
-        }
-    }
-    let direction = if keys.any_just_pressed([KeyCode::ArrowDown, config.down()]) {
+    let direction = if down_active {
         1
-    } else if keys.any_just_pressed([KeyCode::ArrowUp, config.up()]) {
+    } else if up_active {
         -1
     } else {
         0
     };
 
     let next_selection = match (selected_label, direction) {
-        (Label::Game, 1) => Some(Label::Help),
+        (Label::Play, 1) => Some(Label::Help),
+        (Label::Play, -1) => {
+            if cfg!(target_arch = "wasm32") {
+                Some(Label::Credits)
+            } else {
+                Some(Label::Quit)
+            }
+        }
         (Label::Help, 1) => Some(Label::Settings),
-        (Label::Help, -1) => Some(Label::Game),
+        (Label::Help, -1) => Some(Label::Play),
         (Label::Settings, 1) => Some(Label::Credits),
         (Label::Settings, -1) => Some(Label::Help),
-        #[cfg(not(target_arch = "wasm32"))]
-        (Label::Credits, 1) => Some(Label::Quit),
+        (Label::Credits, 1) => {
+            if cfg!(target_arch = "wasm32") {
+                Some(Label::Play)
+            } else {
+                Some(Label::Quit)
+            }
+        }
         (Label::Credits, -1) => Some(Label::Settings),
+        #[cfg(not(target_arch = "wasm32"))]
+        (Label::Quit, 1) => Some(Label::Play),
         #[cfg(not(target_arch = "wasm32"))]
         (Label::Quit, -1) => Some(Label::Credits),
         (Label::Volume, 1) => {
             if let Screen::Game = **screen {
-                Some(Label::GameSettingsBack)
+                Some(Label::Back)
             } else {
                 Some(Label::LogicalKeyboardLayout)
             }
         }
+        (Label::Volume, -1) => Some(Label::Back),
         (Label::LogicalKeyboardLayout, 1) => Some(Label::PhysicalKeyboardLayout),
-        (Label::PhysicalKeyboardLayout, 1) => Some(Label::MaxDifficulty),
-        (Label::MaxDifficulty, 1) => Some(Label::SettingsBack),
-        (Label::MaxDifficulty, -1) => Some(Label::PhysicalKeyboardLayout),
-        (Label::SettingsBack, -1) => Some(Label::MaxDifficulty),
-        (Label::PhysicalKeyboardLayout, -1) => Some(Label::LogicalKeyboardLayout),
         (Label::LogicalKeyboardLayout, -1) => Some(Label::Volume),
+        (Label::PhysicalKeyboardLayout, 1) => Some(Label::MaxDifficulty),
+        (Label::PhysicalKeyboardLayout, -1) => Some(Label::LogicalKeyboardLayout),
+        (Label::MaxDifficulty, 1) => Some(Label::Back),
+        (Label::MaxDifficulty, -1) => Some(Label::PhysicalKeyboardLayout),
         (Label::ProgrammingLanguage, 1) => Some(Label::GameEngine),
+        (Label::ProgrammingLanguage, -1) => Some(Label::Back),
         (Label::GameEngine, 1) => Some(Label::LaunchProjectileSound),
         (Label::GameEngine, -1) => Some(Label::ProgrammingLanguage),
         (Label::LaunchProjectileSound, 1) => Some(Label::ExplosionSound),
@@ -950,18 +971,33 @@ pub fn keypress(
         (Label::ExplosionSound, -1) => Some(Label::LaunchProjectileSound),
         (Label::MistypeSound, 1) => Some(Label::Source),
         (Label::MistypeSound, -1) => Some(Label::ExplosionSound),
-        (Label::Source, 1) => Some(Label::CreditsBack),
+        (Label::Source, 1) => Some(Label::Back),
         (Label::Source, -1) => Some(Label::MistypeSound),
-        (Label::CreditsBack, -1) => Some(Label::Source),
         (Label::Resume, 1) => Some(Label::GameSettings),
-        (Label::GameSettings, 1) => Some(Label::PauseBack),
+        (Label::Resume, -1) => Some(Label::Back),
+        (Label::GameSettings, 1) => Some(Label::Back),
         (Label::GameSettings, -1) => Some(Label::Resume),
-        (Label::PauseBack, -1) => Some(Label::GameSettings),
-        (Label::PlayAgain, 1) => Some(Label::EndBack),
-        (Label::EndBack, -1) => Some(Label::PlayAgain),
-        (Label::GameSettingsBack, -1) => Some(Label::Volume),
+        (Label::PlayAgain, 1) => Some(Label::Back),
+        (Label::PlayAgain, -1) => Some(Label::Back),
+        (Label::Back, 1) => match (**screen, **game_screen) {
+            (Screen::Settings, _) => Some(Label::Volume),
+            (Screen::Credits, _) => Some(Label::ProgrammingLanguage),
+            (Screen::Game, GameScreen::Settings) => Some(Label::Volume),
+            (Screen::Game, GameScreen::Pause) => Some(Label::Resume),
+            (Screen::Game, GameScreen::End) => Some(Label::PlayAgain),
+            _ => None,
+        },
+        (Label::Back, -1) => match (**screen, **game_screen) {
+            (Screen::Settings, _) => Some(Label::MaxDifficulty),
+            (Screen::Credits, _) => Some(Label::Source),
+            (Screen::Game, GameScreen::Settings) => Some(Label::Volume),
+            (Screen::Game, GameScreen::Pause) => Some(Label::Resume),
+            (Screen::Game, GameScreen::End) => Some(Label::PlayAgain),
+            _ => None,
+        },
         _ => None,
     };
+
     if let Some(a) = next_selection
         && let Some((next, _)) = elements
             .iter()
@@ -972,12 +1008,34 @@ pub fn keypress(
         }
         commands.entity(next).insert(Selected);
     }
+}
+
+pub fn keypress_action(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut config: ResMut<Config>,
+    active: Query<(Entity, &Label), With<Active>>,
+    selected: Single<(Entity, &Label), With<Selected>>,
+    keyboard_options: Query<(Entity, &Label), With<KeyboardOption>>,
+    mut app_exit_msg: MessageWriter<AppExit>,
+    mut pause_msg: MessageWriter<PauseMsg>,
+    mut max_difficulty_toggle: Query<&mut BackgroundColor, With<MaxDifToggle>>,
+    mut vtime: ResMut<Time<Virtual>>,
+    screen: Res<State<Screen>>,
+    game_screen: Res<State<GameScreen>>,
+    mut next_screen: ResMut<NextState<Screen>>,
+    mut next_game_screen: ResMut<NextState<GameScreen>>,
+    mut pkv: ResMut<PkvStore>,
+) {
+    let (_, selected_label) = *selected;
     if keys.any_just_pressed([KeyCode::Enter, KeyCode::Space]) {
         do_action(
             *selected_label,
             &mut commands,
             &mut app_exit_msg,
             &mut pause_msg,
+            &screen,
+            &game_screen,
             &mut next_screen,
             &mut next_game_screen,
             &active,

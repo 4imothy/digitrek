@@ -220,6 +220,9 @@ mod colors {
     pub const VOLUME_BAR: Color = palette::WHITE;
 }
 
+const KEY_REPEAT_DELAY: f32 = 0.4;
+const KEY_REPEAT_INTERVAL: f32 = 0.1;
+
 #[derive(Resource)]
 struct Config {
     high_score: usize,
@@ -327,7 +330,7 @@ impl Config {
     }
 }
 
-#[derive(Serialize, Deserialize, PartialEq)]
+#[derive(Serialize, Deserialize)]
 enum KeyboardLayouts {
     Qwerty,
     Dvorak,
@@ -413,7 +416,8 @@ fn menu_plugin(app: &mut App) {
                 menu::mouse,
                 menu::on_selection,
                 menu::on_active,
-                menu::keypress,
+                menu::keypress_navigate,
+                menu::keypress_action,
             )
                 .run_if(in_menu),
         )
@@ -426,7 +430,28 @@ fn menu_plugin(app: &mut App) {
             )
                 .run_if(in_state(Screen::Settings).or(in_state(GameScreen::Settings))),
         )
-        .insert_resource(VolumeDrag(false));
+        .insert_resource(VolumeDrag(false))
+        .insert_resource(KeyState::default())
+        .add_systems(Update, update_key_state);
+}
+
+fn update_key_state(
+    keys: Res<ButtonInput<KeyCode>>,
+    config: Res<Config>,
+    mut key: ResMut<KeyState>,
+    rtime: Res<Time<Real>>,
+) {
+    key.update(
+        keys.pressed(KeyCode::ArrowUp) || keys.pressed(config.up()),
+        keys.pressed(KeyCode::ArrowDown) || keys.pressed(config.down()),
+        keys.pressed(KeyCode::ArrowLeft) || keys.pressed(config.left()),
+        keys.pressed(KeyCode::ArrowRight) || keys.pressed(config.right()),
+        keys.just_pressed(KeyCode::ArrowUp) || keys.just_pressed(config.up()),
+        keys.just_pressed(KeyCode::ArrowDown) || keys.just_pressed(config.down()),
+        keys.just_pressed(KeyCode::ArrowLeft) || keys.just_pressed(config.left()),
+        keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(config.right()),
+        rtime.delta_secs(),
+    );
 }
 
 fn in_menu(state: Res<State<Screen>>, game_state: Res<State<GameScreen>>) -> bool {
@@ -567,7 +592,7 @@ struct CreditsScreen;
 #[derive(Component)]
 struct MenuScreen;
 
-#[derive(Clone, Copy, Default, Eq, PartialEq, Debug, Hash, States)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug, Hash, States)]
 enum Screen {
     #[default]
     MainMenu,
@@ -577,7 +602,7 @@ enum Screen {
     Credits,
 }
 
-#[derive(Clone, Copy, Default, Eq, PartialEq, Debug, Hash, States)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug, Hash, States)]
 enum GameScreen {
     #[default]
     Running,
@@ -590,12 +615,6 @@ enum GameScreen {
 #[derive(Component)]
 struct Player {
     selected: Option<Entity>,
-}
-
-#[derive(Resource)]
-struct MovementControls {
-    v: Option<bool>,
-    h: Option<bool>,
 }
 
 #[derive(Message)]
@@ -638,7 +657,7 @@ struct Summoner {
     leading_vertex: usize,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy)]
 enum Shape {
     Triangle,
     Rhombus,
@@ -678,21 +697,6 @@ struct Indicator {
 struct PlayerLauncher;
 
 #[derive(Component)]
-struct Foe {
-    shape: Shape,
-    keys: [char; FOE_MAX_NUM_KEYS],
-    cleared: usize,
-    skipped: usize,
-    next_index: usize,
-    orig_len: usize,
-    bounce_velocity: Option<Vec2>,
-    bounce_timer: f32,
-    colliding: bool,
-    spawned_by: Option<Entity>,
-    entered_viewport: bool,
-}
-
-#[derive(Component)]
 struct Slowdown {
     time: f32,
 }
@@ -725,6 +729,21 @@ impl AudioMsg {
             AudioMsg::UnmatchedKeypress => sounds.unmatched_keypress.clone(),
         }
     }
+}
+
+#[derive(Component)]
+struct Foe {
+    shape: Shape,
+    keys: [char; FOE_MAX_NUM_KEYS],
+    cleared: usize,
+    skipped: usize,
+    next_index: usize,
+    orig_len: usize,
+    bounce_velocity: Option<Vec2>,
+    bounce_timer: f32,
+    colliding: bool,
+    spawned_by: Option<Entity>,
+    entered_viewport: bool,
 }
 
 impl Foe {
@@ -776,6 +795,70 @@ struct ResumeCountdown {
 
 #[derive(Resource)]
 struct VolumeDrag(bool);
+
+#[derive(Resource, Default)]
+struct KeyState {
+    should_repeat: bool,
+    held_time: f32,
+    last_repeat: f32,
+    v: Option<bool>,
+    h: Option<bool>,
+}
+
+impl KeyState {
+    fn update(
+        &mut self,
+        up: bool,
+        down: bool,
+        left: bool,
+        right: bool,
+        up_just: bool,
+        down_just: bool,
+        left_just: bool,
+        right_just: bool,
+        dt: f32,
+    ) {
+        if down_just {
+            self.v = Some(true);
+        } else if up_just {
+            self.v = Some(false);
+        } else if down ^ up {
+            self.v = Some(down);
+        } else if !down && !up {
+            self.v = None;
+        }
+
+        if right_just {
+            self.h = Some(true);
+        } else if left_just {
+            self.h = Some(false);
+        } else if right ^ left {
+            self.h = Some(right);
+        } else if !right && !left {
+            self.h = None;
+        }
+
+        let held = up || down || left || right;
+        let just_pressed = up_just || down_just || left_just || right_just;
+
+        if just_pressed {
+            self.held_time = 0.;
+            self.last_repeat = 0.;
+            self.should_repeat = false;
+        } else if held {
+            self.held_time += dt;
+            self.should_repeat = self.held_time >= KEY_REPEAT_DELAY
+                && self.held_time - self.last_repeat >= KEY_REPEAT_INTERVAL;
+            if self.should_repeat {
+                self.last_repeat = self.held_time;
+            }
+        } else {
+            self.held_time = 0.;
+            self.last_repeat = 0.;
+            self.should_repeat = false;
+        }
+    }
+}
 
 #[derive(Component)]
 pub struct VolumeControl;

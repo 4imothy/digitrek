@@ -167,7 +167,6 @@ pub fn setup(
         unmatched_keypress: asset_server.load("unmatched_keypress.ogg"),
         explosion: asset_server.load("explosion.ogg"),
     });
-    commands.insert_resource(MovementControls { v: None, h: None });
     commands.insert_resource(Clock(0.));
 }
 
@@ -433,41 +432,14 @@ fn viewport_width(win: &Window) -> f32 {
 
 pub fn player_movement(
     time: Res<Time<Virtual>>,
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut controls: ResMut<MovementControls>,
+    key: Res<KeyState>,
     mut transform: Single<&mut Transform, With<Player>>,
     window: Single<&Window>,
-    config: Res<Config>,
     stats: Single<&Stats>,
 ) {
     if stats.running {
-        let up = keyboard_input.pressed(config.up());
-        let down = keyboard_input.pressed(config.down());
-        let right = keyboard_input.pressed(config.right());
-        let left = keyboard_input.pressed(config.left());
-
-        if keyboard_input.just_pressed(config.right()) {
-            controls.h = Some(true);
-        } else if keyboard_input.just_pressed(config.left()) {
-            controls.h = Some(false);
-        } else if right ^ left {
-            controls.h = Some(right);
-        } else if !left && !right {
-            controls.h = None;
-        }
-
-        if keyboard_input.just_pressed(config.up()) {
-            controls.v = Some(true);
-        } else if keyboard_input.just_pressed(config.down()) {
-            controls.v = Some(false);
-        } else if up ^ down {
-            controls.v = Some(up);
-        } else if !up && !down {
-            controls.v = None;
-        }
-
-        let rotation_factor = controls.h.map(|v| if v { -1. } else { 1. }).unwrap_or(0.);
-        let movement_factor = controls.v.map(|v| if v { -1. } else { 1. }).unwrap_or(0.);
+        let rotation_factor = key.h.map(|v| if v { -1. } else { 1. }).unwrap_or(0.);
+        let movement_factor = key.v.map(|v| if v { 1. } else { -1. }).unwrap_or(0.);
 
         let dt = time.delta_secs();
         let rotation_delta = rotation_factor * PLAYER_ROTATION_SPEED * dt;
