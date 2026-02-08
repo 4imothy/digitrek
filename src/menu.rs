@@ -23,6 +23,7 @@ pub enum Label {
     MaxDifficulty,
     ProgrammingLanguage,
     GameEngine,
+    Palette,
     LaunchProjectileSound,
     ExplosionSound,
     MistypeSound,
@@ -45,15 +46,16 @@ impl Label {
         }
     }
 
-    fn to_link(self) -> Option<&'static str> {
+    fn to_link(self) -> &'static str {
         match self {
-            Label::ProgrammingLanguage => Some(credits::PROGRAMMING_LANGUAGE_LINK),
-            Label::GameEngine => Some(credits::GAME_ENGINE_LINK),
-            Label::LaunchProjectileSound => Some(credits::LAUNCH_PROJECTILE_SOUND_LINK),
-            Label::ExplosionSound => Some(credits::EXPLOSION_SOUND_LINK),
-            Label::MistypeSound => Some(credits::MISTYPE_SOUND_LINK),
-            Label::Source => Some(credits::SOURCE_LINK),
-            _ => None,
+            Label::ProgrammingLanguage => credits::PROGRAMMING_LANGUAGE_LINK,
+            Label::GameEngine => credits::GAME_ENGINE_LINK,
+            Label::Palette => credits::PALETTE_LINK,
+            Label::LaunchProjectileSound => credits::LAUNCH_PROJECTILE_SOUND_LINK,
+            Label::ExplosionSound => credits::EXPLOSION_SOUND_LINK,
+            Label::MistypeSound => credits::MISTYPE_SOUND_LINK,
+            Label::Source => credits::SOURCE_LINK,
+            _ => unreachable!(),
         }
     }
 }
@@ -104,21 +106,24 @@ pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
                 ..default()
             },))
                 .with_children(|title| {
-                    let angle_span = PI / 2.5;
+                    let name = env!("CARGO_PKG_NAME");
+                    let len = name.chars().count();
+                    let angle_span = PI / 2.;
                     let angle_start = -angle_span / 2.;
-                    for (i, c) in env!("CARGO_PKG_NAME").chars().enumerate() {
-                        let angle = angle_start + i as f32 * (angle_span / (8 - 1) as f32);
+                    for (i, c) in name.chars().enumerate() {
+                        let t = i as f32 / (len - 1) as f32;
+                        let angle = angle_start + t * angle_span;
                         title.spawn((
                             Text::new(c),
                             TITLE_FONT.clone(),
-                            UiTransform::from_rotation(Rot2::radians(angle)),
+                            UiTransform {
+                                translation: Val2::new(Val::ZERO, Val::Vh(-10. * (t * PI).sin())),
+                                rotation: Rot2::radians(angle),
+                                ..default()
+                            },
+                            TextColor(colors::TITLE_POOL[i]),
                             Node {
-                                padding: UiRect::new(
-                                    Val::Vh(0.),
-                                    Val::Vw(1.),
-                                    Val::Vh(0.),
-                                    Val::Vh(10. * (PI / 7. * i as f32).sin()),
-                                ),
+                                padding: UiRect::horizontal(Val::Vh(1.)),
                                 ..default()
                             },
                         ));
@@ -128,7 +133,7 @@ pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
             cmd.spawn((
                 Text::new(format!("highscore: {}", config.high_score)),
                 FONT.clone(),
-                TextColor(colors::TEXT_FUTURE),
+                TextColor(colors::LABEL),
             ));
 
             for (action, label) in [
@@ -146,7 +151,11 @@ pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
                     action,
                 ));
                 entity.with_children(|parent| {
-                    parent.spawn((Text::new(label), FONT.clone(), TextColor(colors::TEXT_NEXT)));
+                    parent.spawn((
+                        Text::new(label),
+                        FONT.clone(),
+                        TextColor(colors::BUTTON_TEXT),
+                    ));
                 });
                 if let Label::Play = action {
                     entity.insert(Selected);
@@ -287,7 +296,6 @@ fn do_action(
             }
             (Screen::Game, GameScreen::Pause | GameScreen::End) => {
                 vtime.unpause();
-                vtime.set_relative_speed(1.);
                 next_screen.set(Screen::MainMenu);
             }
             _ => {}
@@ -314,17 +322,16 @@ fn do_action(
         }
         Label::ProgrammingLanguage
         | Label::GameEngine
+        | Label::Palette
         | Label::LaunchProjectileSound
         | Label::ExplosionSound
         | Label::MistypeSound
         | Label::Source => {
             #[cfg(not(target_arch = "wasm32"))]
-            let _ = open::that(action.to_link().unwrap());
+            let _ = open::that(action.to_link());
 
             #[cfg(target_arch = "wasm32")]
-            let _ = web_sys::window()
-                .unwrap()
-                .open_with_url(action.to_link().unwrap());
+            let _ = web_sys::window().unwrap().open_with_url(action.to_link());
         }
         Label::Resume => {
             pause_msg.write(PauseMsg::TogglePause);
@@ -334,7 +341,6 @@ fn do_action(
         }
         Label::PlayAgain => {
             vtime.unpause();
-            vtime.set_relative_speed(1.);
             next_screen.set(Screen::Game);
         }
         Label::MaxDifficulty => {
@@ -343,7 +349,7 @@ fn do_action(
                 BackgroundColor(if config.max_difficulty {
                     colors::SELECTED_OUTLINE
                 } else {
-                    colors::BACKGROUND
+                    colors::BASE
                 });
         }
         _ => {}
@@ -388,7 +394,11 @@ pub fn pause_setup(mut commands: Commands) {
                     action,
                 ));
                 entity.with_children(|parent| {
-                    parent.spawn((Text::new(label), FONT.clone(), TextColor(colors::TEXT_NEXT)));
+                    parent.spawn((
+                        Text::new(label),
+                        FONT.clone(),
+                        TextColor(colors::BUTTON_TEXT),
+                    ));
                 });
                 if let Label::Resume = action {
                     entity.insert(Selected);
@@ -426,7 +436,11 @@ pub fn end_setup(mut commands: Commands, stats: Single<&mut Stats>) {
                     action,
                 ));
                 entity.with_children(|parent| {
-                    parent.spawn((Text::new(label), FONT.clone(), TextColor(colors::TEXT_NEXT)));
+                    parent.spawn((
+                        Text::new(label),
+                        FONT.clone(),
+                        TextColor(colors::BUTTON_TEXT),
+                    ));
                 });
                 if let Label::PlayAgain = action {
                     entity.insert(Selected);
@@ -479,7 +493,7 @@ pub fn help_setup(mut commands: Commands, config: Res<Config>) {
                     right = config.right_char(),
                 )),
                 FONT.clone(),
-                TextColor(colors::TEXT_FUTURE),
+                TextColor(colors::LABEL),
                 TextLayout {
                     justify: Justify::Center,
                     ..default()
@@ -497,7 +511,7 @@ pub fn help_setup(mut commands: Commands, config: Res<Config>) {
                     button.spawn((
                         Text::new("back"),
                         FONT.clone(),
-                        TextColor(colors::TEXT_NEXT),
+                        TextColor(colors::BUTTON_TEXT),
                     ));
                 });
         });
@@ -531,7 +545,7 @@ pub fn game_settings_setup(mut commands: Commands, config: Res<Config>) {
                     button.spawn((
                         Text::new("back"),
                         FONT.clone(),
-                        TextColor(colors::TEXT_NEXT),
+                        TextColor(colors::BUTTON_TEXT),
                     ));
                 });
         });
@@ -548,7 +562,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                 },
                 Text::new("keyboard layout"),
                 FONT.clone(),
-                TextColor(colors::TEXT_FUTURE),
+                TextColor(colors::LABEL),
             ));
 
             let layout_groups = [
@@ -611,7 +625,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                         row.spawn((
                             Text::new(group_text),
                             FONT.clone(),
-                            TextColor(colors::TEXT_FUTURE),
+                            TextColor(colors::LABEL),
                         ));
 
                         for (button_label, button_text, active) in buttons {
@@ -629,7 +643,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                                 b.spawn((
                                     Text::new(button_text),
                                     FONT.clone(),
-                                    TextColor(colors::TEXT_NEXT),
+                                    TextColor(colors::BUTTON_TEXT),
                                 ));
                             });
                         }
@@ -650,7 +664,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                     button.spawn((
                         Text::new("max difficulty"),
                         FONT.clone(),
-                        TextColor(colors::TEXT_NEXT),
+                        TextColor(colors::BUTTON_TEXT),
                         TextLayout::new_with_no_wrap(),
                     ));
                     button.spawn((
@@ -667,7 +681,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                         BackgroundColor(if config.max_difficulty {
                             colors::SELECTED_OUTLINE
                         } else {
-                            colors::BACKGROUND
+                            colors::BASE
                         }),
                     ));
                 });
@@ -683,7 +697,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                     button.spawn((
                         Text::new("back"),
                         FONT.clone(),
-                        TextColor(colors::TEXT_NEXT),
+                        TextColor(colors::BUTTON_TEXT),
                     ));
                 });
         });
@@ -697,7 +711,7 @@ fn add_volume(par: &mut RelatedSpawnerCommands<ChildOf>, config: &Config) {
         },
         Text::new(format!("{} {}", VOLUME_LABEL_PREFIX, config.volume)),
         FONT.clone(),
-        TextColor(colors::TEXT_FUTURE),
+        TextColor(colors::LABEL),
         VolumeDisplay,
     ));
     par.spawn((
@@ -738,6 +752,7 @@ pub fn credits_setup(mut commands: Commands) {
                     credits::PROGRAMMING_LANGUAGE_TEXT,
                 ),
                 (Label::GameEngine, credits::GAME_ENGINE_TEXT),
+                (Label::Palette, credits::PALETTE_TEXT),
                 (
                     Label::LaunchProjectileSound,
                     credits::LAUNCH_PROJECTILE_SOUND_TEXT,
@@ -756,7 +771,11 @@ pub fn credits_setup(mut commands: Commands) {
                     ent.insert(Selected);
                 }
                 ent.with_children(|button| {
-                    button.spawn((Text::new(text), FONT.clone(), TextColor(colors::TEXT_NEXT)));
+                    button.spawn((
+                        Text::new(text),
+                        FONT.clone(),
+                        TextColor(colors::BUTTON_TEXT),
+                    ));
                 });
             }
             screen
@@ -770,7 +789,7 @@ pub fn credits_setup(mut commands: Commands) {
                     button.spawn((
                         Text::new("back"),
                         FONT.clone(),
-                        TextColor(colors::TEXT_NEXT),
+                        TextColor(colors::BUTTON_TEXT),
                     ));
                 });
         });
@@ -963,10 +982,12 @@ pub fn keypress_navigate(
         (Label::MaxDifficulty, -1) => Some(Label::PhysicalKeyboardLayout),
         (Label::ProgrammingLanguage, 1) => Some(Label::GameEngine),
         (Label::ProgrammingLanguage, -1) => Some(Label::Back),
-        (Label::GameEngine, 1) => Some(Label::LaunchProjectileSound),
+        (Label::GameEngine, 1) => Some(Label::Palette),
         (Label::GameEngine, -1) => Some(Label::ProgrammingLanguage),
+        (Label::Palette, 1) => Some(Label::LaunchProjectileSound),
+        (Label::Palette, -1) => Some(Label::GameEngine),
         (Label::LaunchProjectileSound, 1) => Some(Label::ExplosionSound),
-        (Label::LaunchProjectileSound, -1) => Some(Label::GameEngine),
+        (Label::LaunchProjectileSound, -1) => Some(Label::Palette),
         (Label::ExplosionSound, 1) => Some(Label::MistypeSound),
         (Label::ExplosionSound, -1) => Some(Label::LaunchProjectileSound),
         (Label::MistypeSound, 1) => Some(Label::Source),
@@ -1015,7 +1036,7 @@ pub fn keypress_action(
     keys: Res<ButtonInput<KeyCode>>,
     mut config: ResMut<Config>,
     active: Query<(Entity, &Label), With<Active>>,
-    selected: Single<(Entity, &Label), With<Selected>>,
+    selected: Single<&Label, With<Selected>>,
     keyboard_options: Query<(Entity, &Label), With<KeyboardOption>>,
     mut app_exit_msg: MessageWriter<AppExit>,
     mut pause_msg: MessageWriter<PauseMsg>,
@@ -1027,10 +1048,16 @@ pub fn keypress_action(
     mut next_game_screen: ResMut<NextState<GameScreen>>,
     mut pkv: ResMut<PkvStore>,
 ) {
-    let (_, selected_label) = *selected;
-    if keys.any_just_pressed([KeyCode::Enter, KeyCode::Space]) {
+    let selected = if keys.just_pressed(KeyCode::Escape) && **game_screen != GameScreen::Pause {
+        Some(Label::Back)
+    } else if keys.any_just_pressed([KeyCode::Enter, KeyCode::Space]) {
+        Some(**selected)
+    } else {
+        None
+    };
+    if let Some(s) = selected {
         do_action(
-            *selected_label,
+            s,
             &mut commands,
             &mut app_exit_msg,
             &mut pause_msg,

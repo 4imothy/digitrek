@@ -5,7 +5,6 @@
 
 mod credits;
 mod game;
-mod keys;
 mod menu;
 mod msg;
 use bevy::{
@@ -22,8 +21,8 @@ use std::{f32::consts::PI, sync::LazyLock};
 const SHOW_LOCAL_POINTS: bool = cfg!(feature = "show_local_points");
 const INVINCIBLE: bool = cfg!(feature = "invincible");
 const ONE_KEY: bool = cfg!(feature = "one_key");
-const MAX_DIF: bool = cfg!(feature = "max_dif");
 const MIN_DELAY: bool = cfg!(feature = "min_delay");
+const TIME_MULTIPLIER: f32 = 1.;
 
 const PLAYER_RADIUS: f32 = 50.;
 const FOE_SIZE: f32 = PLAYER_RADIUS * 1.2;
@@ -79,9 +78,8 @@ const RHOMBUS_NUM_KEYS: usize = 2;
 const PENTAGON_NUM_KEYS: usize = 3;
 const HEXAGON_NUM_KEYS: usize = 4;
 const FOE_MAX_NUM_KEYS: usize = HEXAGON_NUM_KEYS;
-const HEXAGON_OBSTACLE_DELAY: f32 = 4.;
+const HEXAGON_LAUNCH_DELAY: f32 = 4.;
 const HEXAGON_VIEWPORT_PADDING: f32 = FOE_SIZE * 3.;
-const HEXAGON_Z_INDEX: f32 = 3.5;
 const PENTAGON_SUMMON_WEIGHTS: [f32; 1] = [1.0];
 const PENTAGON_SPAWN_DELAY: f32 = 5.;
 const PROJECTILE_INC_TIME: f32 = 0.1;
@@ -149,17 +147,18 @@ fn spawner_foe_delay_mu(x: f32, max_dif: bool) -> f32 {
     }
 }
 
-const TRACKING_Z_INDEX: f32 = 2.;
-const OBSTACLE_Z_INDEX: f32 = 1.;
 const EXPLOSION_Z_INDEX: f32 = 0.;
 const EXPLOSION_Z_INDEX_RANGE: f32 = 0.1;
+const OBSTACLE_Z_INDEX: f32 = 1.;
+const TRACKING_Z_INDEX: f32 = 2.;
 const SUMMONER_Z_INDEX: f32 = 3.;
-const INDICATOR_Z_INDEX: f32 = 5.;
-const PLAYER_Z_INDEX: f32 = 4.;
+const HEXAGON_Z_INDEX: f32 = 4.;
+const PLAYER_Z_INDEX: f32 = 5.;
+const INDICATOR_Z_INDEX: f32 = 6.;
 const VIEWPORT_HEIGHT: f32 = 1000.;
 
 static TITLE_FONT: LazyLock<TextFont> = LazyLock::new(|| TextFont {
-    font_size: 60.,
+    font_size: 80.,
     ..default()
 });
 static FONT: LazyLock<TextFont> = LazyLock::new(|| TextFont {
@@ -180,48 +179,71 @@ const PHYSICAL_KEYBOARD_LAYOUT_KEY: &str = "physical_keyboard_layout_key";
 const LOGICAL_KEYBOARD_LAYOUT_KEY: &str = "logical_keyboard_layout_key";
 const MAX_DIFFICULTY_KEY: &str = "max_difficulty";
 
-mod palette {
-    use bevy::color::Color;
-    pub const BLACK: Color = Color::srgb(0., 0., 0.);
-    pub const WHITE: Color = Color::srgb(1., 1., 1.);
-    pub const RED: Color = Color::srgb(1., 0., 0.);
-    pub const GREEN: Color = Color::srgb(0., 1., 0.);
-    pub const BLUE: Color = Color::srgb(0., 0., 1.);
-    pub const YELLOW: Color = Color::srgb(1., 1., 0.);
-    pub const MAGENTA: Color = Color::srgb(0.5, 0., 0.5);
-    pub const CYAN: Color = Color::srgb(0., 0.5, 0.5);
-    pub const GREY: Color = Color::srgb(0.5, 0.5, 0.5);
-    pub const CHARCOAL: Color = Color::srgb(0.28, 0.28, 0.28);
-    pub const ORANGE: Color = Color::srgb(1., 0.5, 0.);
-}
-
 mod colors {
-    use crate::palette;
     use bevy::color::{Color, Srgba};
-    pub const BACKGROUND: Color = palette::BLACK;
-    pub const TRIANGLE: Color = palette::RED;
-    pub const RHOMBUS: Color = palette::BLUE;
-    pub const PENTAGON: Color = palette::MAGENTA;
-    pub const HEXAGON: Color = palette::ORANGE;
-    pub const INDICATOR: Color = palette::YELLOW;
-    pub const PROJECTILE: Color = palette::WHITE;
-    pub const OBSTACLE: Color = palette::CYAN;
-    pub const PLAYER: Color = palette::WHITE;
-    pub const LAUNCHER: Color = palette::GREY;
-    pub const TEXT_NEXT: Color = palette::GREEN;
-    pub const TEXT_DONE: Color = palette::BLACK;
-    pub const TEXT_FUTURE: Color = palette::WHITE;
-    pub const IN_GAME_MENU: Color = match palette::CHARCOAL {
+
+    // https://draculatheme.com/spec
+    const BACKGROUND: Color = Color::srgb_u8(40, 42, 54);
+    const SELECTION: Color = Color::srgb_u8(68, 71, 90);
+    const COMMENT: Color = Color::srgb_u8(98, 114, 164);
+    const FOREGROUND: Color = Color::srgb_u8(248, 248, 242);
+    const GREEN: Color = Color::srgb_u8(80, 250, 123);
+    const YELLOW: Color = Color::srgb_u8(241, 250, 140);
+    const CYAN: Color = Color::srgb_u8(139, 233, 253);
+    const PURPLE: Color = Color::srgb_u8(189, 147, 249);
+    const PINK: Color = Color::srgb_u8(255, 121, 198);
+    const ORANGE: Color = Color::srgb_u8(255, 184, 108);
+    const RED: Color = Color::srgb_u8(255, 85, 85);
+
+    pub const BASE: Color = BACKGROUND;
+    pub const TRIANGLE: Color = RED;
+    pub const RHOMBUS: Color = PINK;
+    pub const PENTAGON: Color = PURPLE;
+    pub const HEXAGON: Color = ORANGE;
+    pub const INDICATOR: Color = YELLOW;
+    pub const PROJECTILE: Color = FOREGROUND;
+    pub const OBSTACLE: Color = CYAN;
+    pub const PLAYER: Color = FOREGROUND;
+    pub const LAUNCHER: Color = SELECTION;
+    pub const TEXT_NEXT: Color = GREEN;
+    pub const TEXT_DONE: Color = BACKGROUND;
+    pub const TEXT_FUTURE: Color = COMMENT;
+    pub const LABEL: Color = FOREGROUND;
+    pub const BUTTON_TEXT: Color = PURPLE;
+    pub const IN_GAME_MENU: Color = match SELECTION {
         Color::Srgba(x) => Color::Srgba(Srgba { alpha: 0.7, ..x }),
-        _ => Color::srgb(0., 0., 0.),
+        _ => unreachable!(),
     };
-    pub const SELECTED_OUTLINE: Color = palette::WHITE;
-    pub const UNSELECTED_OUTLINE: Color = palette::GREY;
-    pub const VOLUME_BAR: Color = palette::WHITE;
+    pub const SELECTED_OUTLINE: Color = FOREGROUND;
+    pub const UNSELECTED_OUTLINE: Color = COMMENT;
+    pub const VOLUME_BAR: Color = FOREGROUND;
+    pub const TITLE_POOL: [Color; env!("CARGO_PKG_NAME").len()] =
+        [GREEN, PINK, ORANGE, PINK, YELLOW, PURPLE, CYAN, RED];
 }
 
 const KEY_REPEAT_DELAY: f32 = 0.4;
 const KEY_REPEAT_INTERVAL: f32 = 0.1;
+
+#[rustfmt::skip]
+const QWERTY_POOL: [char; 16] = [
+    'y', 'u', 'i', 'o', 'p',
+    'h', 'j', 'k', 'l', ';', '\'',
+    'n', 'm', ',', '.', '/',
+];
+
+#[rustfmt::skip]
+const DVORAK_POOL: [char; 16] = [
+    'f', 'g', 'c', 'r', 'l',
+    'd', 'h', 't', 'n', 's', '-',
+    'b', 'm', 'w', 'v', 'z',
+];
+
+#[rustfmt::skip]
+const COLEMAK_POOL: [char; 16] = [
+    'j', 'l', 'u', 'y', ';',
+    'h', 'n', 'e', 'i', 'o', '\'',
+    'k', 'm', ',', '.', '/',
+];
 
 #[derive(Resource)]
 struct Config {
@@ -323,9 +345,9 @@ impl Config {
 
     pub fn keypool(&self) -> [char; 16] {
         match self.logical_keyboard_layout {
-            KeyboardLayouts::Qwerty => keys::QWERTY_POOL,
-            KeyboardLayouts::Dvorak => keys::DVORAK_POOL,
-            KeyboardLayouts::Colemak => keys::COLEMAK_POOL,
+            KeyboardLayouts::Qwerty => QWERTY_POOL,
+            KeyboardLayouts::Dvorak => DVORAK_POOL,
+            KeyboardLayouts::Colemak => COLEMAK_POOL,
         }
     }
 }
@@ -360,7 +382,7 @@ fn main() {
         .add_systems(Startup, setup)
         .init_state::<Screen>()
         .insert_resource(Config::load(&mut pkv))
-        .insert_resource(ClearColor(colors::BACKGROUND))
+        .insert_resource(ClearColor(colors::BASE))
         .insert_resource(pkv)
         .run();
 }

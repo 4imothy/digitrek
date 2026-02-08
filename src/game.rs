@@ -15,8 +15,10 @@ pub fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    mut vtime: ResMut<Time<Virtual>>,
     asset_server: Res<AssetServer>,
 ) {
+    vtime.set_relative_speed(TIME_MULTIPLIER);
     let mut launcher_mesh = Mesh::new(
         bevy::render::render_resource::PrimitiveTopology::TriangleStrip,
         RenderAssetUsages::default(),
@@ -907,7 +909,8 @@ fn circle_polygon_collide(circle_center: Vec2, radius: f32, polygon: &[Vec3]) ->
         }
     }
 
-    if (circle_center - polygon[0].xy()).dot(smallest_axis) < 0. {
+    let centroid = polygon.iter().map(|p| p.xy()).sum::<Vec2>() / polygon.len() as f32;
+    if (circle_center - centroid).dot(smallest_axis) < 0. {
         smallest_axis = -smallest_axis;
     }
 
@@ -980,8 +983,8 @@ pub fn enemy_collisions(
         let points_a: &[Vec3] = points!(enemy_a.shape, transform_a);
         let points_b: &[Vec3] = points!(enemy_b.shape, transform_b);
 
-        if enemy_a.spawned_by.is_none()
-            && enemy_b.spawned_by.is_none()
+        if enemy_a.spawned_by != Some(entity_b)
+            && enemy_b.spawned_by != Some(entity_a)
             && let Some((normal, a_to_b)) = collide(points_a, points_b, None)
         {
             if !enemy_a.colliding {
@@ -1139,7 +1142,7 @@ pub fn spawner(
             None,
             None,
         ));
-        spawner.foe_delay_mu = spawner_foe_delay_mu(clock.0, MAX_DIF || config.max_difficulty);
+        spawner.foe_delay_mu = spawner_foe_delay_mu(clock.0, config.max_difficulty);
 
         spawner.foe_delay =
             rng.random_range(spawner.foe_delay_mu - SPAWN_DELTA..spawner.foe_delay_mu + SPAWN_DELTA)

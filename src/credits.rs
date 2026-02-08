@@ -6,6 +6,9 @@ pub const PROGRAMMING_LANGUAGE_LINK: &str = "https://www.rust-lang.org";
 pub const GAME_ENGINE_TEXT: &str = "created with the bevy game engine";
 pub const GAME_ENGINE_LINK: &str = "https://bevy.org";
 
+pub const PALETTE_TEXT: &str = "palette from the dracula theme";
+pub const PALETTE_LINK: &str = "https://draculatheme.com/spec";
+
 pub const LAUNCH_PROJECTILE_SOUND_TEXT: &str = "launch projectile sound by u_y3wk5ympz8 on pixabay";
 pub const LAUNCH_PROJECTILE_SOUND_LINK: &str = "https://pixabay.com/users/u_y3wk5ympz8-47045027/?utm_source=link-attribution&utm_medium=referral&utm_campaign=music&utm_content=264682";
 

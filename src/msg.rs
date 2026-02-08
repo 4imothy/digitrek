@@ -257,7 +257,7 @@ fn spawn_foe(
         if ONE_KEY {
             config.keypool()[0]
         } else {
-            config.keypool()[rng.random_range(0..keys::QWERTY_POOL.len())]
+            config.keypool()[rng.random_range(0..QWERTY_POOL.len())]
         }
     });
 
@@ -288,7 +288,7 @@ fn spawn_foe(
             let target_pos = Vec2::new(pos.x.clamp(-half_w, half_w), pos.y.clamp(-half_h, half_h));
             ent_cmds.insert(Launcher {
                 since: 0.,
-                delay: HEXAGON_OBSTACLE_DELAY,
+                delay: HEXAGON_LAUNCH_DELAY,
                 target_pos,
                 stopped: false,
             });
