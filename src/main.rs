@@ -40,14 +40,18 @@ const HEXAGON_LAUNCHER_WIDTH: f32 = OBSTACLE_RADIUS * 2.;
 
 const PLAYER_MOVEMENT_SPEED: f32 = 400.;
 const PLAYER_ROTATION_SPEED: f32 = 4.;
-const TRIANGLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 4.;
-const TRIANGLE_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 6.;
-const RHOMBUS_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 6.;
-const RHOMBUS_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 8.;
-const PENTAGON_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 8.;
-const PENTAGON_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 10.;
-const HEXAGON_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 10.;
-const HEXAGON_ROTATION_SPEED: f32 = PLAYER_ROTATION_SPEED / 12.;
+const SHAPE_MOV_SPEEDS: [f32; NUM_SHAPES] = [
+    PLAYER_MOVEMENT_SPEED / 4.,
+    PLAYER_MOVEMENT_SPEED / 6.,
+    PLAYER_MOVEMENT_SPEED / 8.,
+    PLAYER_MOVEMENT_SPEED / 10.,
+];
+const SHAPE_ROT_SPEEDS: [f32; NUM_SHAPES] = [
+    PLAYER_ROTATION_SPEED / 6.,
+    PLAYER_ROTATION_SPEED / 8.,
+    PLAYER_ROTATION_SPEED / 10.,
+    PLAYER_ROTATION_SPEED / 12.,
+];
 const PROJECTILE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED * 4.;
 const OBSTACLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 3.;
 const BOUNCE_DECAY: f32 = 5.;
@@ -73,11 +77,8 @@ const FOE_FORCE_SUMMONS: [f32; NUM_SHAPES] = [
     FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[3],
 ];
 
-const TRIANGLE_NUM_KEYS: usize = 1;
-const RHOMBUS_NUM_KEYS: usize = 2;
-const PENTAGON_NUM_KEYS: usize = 3;
-const HEXAGON_NUM_KEYS: usize = 4;
-const FOE_MAX_NUM_KEYS: usize = HEXAGON_NUM_KEYS;
+const SHAPE_NUM_KEYS: [usize; NUM_SHAPES] = [1, 2, 3, 4];
+const FOE_MAX_NUM_KEYS: usize = SHAPE_NUM_KEYS[3];
 const HEXAGON_LAUNCH_DELAY: f32 = 4.;
 const HEXAGON_VIEWPORT_PADDING: f32 = FOE_SIZE * 3.;
 const PENTAGON_SUMMON_WEIGHTS: [f32; 1] = [1.0];
@@ -196,10 +197,7 @@ mod colors {
     const RED: Color = Color::srgb_u8(255, 85, 85);
 
     pub const BASE: Color = BACKGROUND;
-    pub const TRIANGLE: Color = RED;
-    pub const RHOMBUS: Color = PINK;
-    pub const PENTAGON: Color = PURPLE;
-    pub const HEXAGON: Color = ORANGE;
+    pub const SHAPE_COLORS: [Color; 4] = [RED, PINK, PURPLE, ORANGE];
     pub const INDICATOR: Color = YELLOW;
     pub const PROJECTILE: Color = FOREGROUND;
     pub const OBSTACLE: Color = CYAN;
@@ -217,7 +215,7 @@ mod colors {
     pub const SELECTED_OUTLINE: Color = FOREGROUND;
     pub const UNSELECTED_OUTLINE: Color = COMMENT;
     pub const VOLUME_BAR: Color = FOREGROUND;
-    pub const TITLE_POOL: [Color; env!("CARGO_PKG_NAME").len()] =
+    pub const TITLE_CHARS: [Color; env!("CARGO_PKG_NAME").len()] =
         [GREEN, PINK, ORANGE, PINK, YELLOW, PURPLE, CYAN, RED];
 }
 
@@ -230,6 +228,12 @@ const QWERTY_POOL: [char; 16] = [
     'h', 'j', 'k', 'l', ';', '\'',
     'n', 'm', ',', '.', '/',
 ];
+const QWERTY_MOVEMENT: [(KeyCode, char); 4] = [
+    (KeyCode::KeyD, 'd'),
+    (KeyCode::KeyA, 'a'),
+    (KeyCode::KeyW, 'w'),
+    (KeyCode::KeyS, 's'),
+];
 
 #[rustfmt::skip]
 const DVORAK_POOL: [char; 16] = [
@@ -237,12 +241,24 @@ const DVORAK_POOL: [char; 16] = [
     'd', 'h', 't', 'n', 's', '-',
     'b', 'm', 'w', 'v', 'z',
 ];
+const DVORAK_MOVEMENT: [(KeyCode, char); 4] = [
+    (KeyCode::KeyE, 'e'),
+    (KeyCode::KeyA, 'a'),
+    (KeyCode::Comma, ','),
+    (KeyCode::KeyO, 'o'),
+];
 
 #[rustfmt::skip]
 const COLEMAK_POOL: [char; 16] = [
     'j', 'l', 'u', 'y', ';',
     'h', 'n', 'e', 'i', 'o', '\'',
     'k', 'm', ',', '.', '/',
+];
+const COLEMAK_MOVEMENT: [(KeyCode, char); 4] = [
+    (KeyCode::KeyS, 's'),
+    (KeyCode::KeyA, 'a'),
+    (KeyCode::KeyW, 'w'),
+    (KeyCode::KeyR, 'r'),
 ];
 
 #[derive(Resource)]
@@ -279,68 +295,37 @@ impl Config {
         config
     }
 
+    fn dir(&self, idx: usize) -> (KeyCode, char) {
+        let m = match self.physical_keyboard_layout {
+            KeyboardLayouts::Qwerty => QWERTY_MOVEMENT,
+            KeyboardLayouts::Dvorak => DVORAK_MOVEMENT,
+            KeyboardLayouts::Colemak => COLEMAK_MOVEMENT,
+        };
+        m[idx]
+    }
     pub fn right(&self) -> KeyCode {
-        match self.physical_keyboard_layout {
-            KeyboardLayouts::Qwerty => KeyCode::KeyD,
-            KeyboardLayouts::Dvorak => KeyCode::KeyE,
-            KeyboardLayouts::Colemak => KeyCode::KeyS,
-        }
+        self.dir(0).0
     }
-
     pub fn right_char(&self) -> char {
-        match self.physical_keyboard_layout {
-            KeyboardLayouts::Qwerty => 'd',
-            KeyboardLayouts::Dvorak => 'e',
-            KeyboardLayouts::Colemak => 's',
-        }
+        self.dir(0).1
     }
-
     pub fn left(&self) -> KeyCode {
-        match self.physical_keyboard_layout {
-            KeyboardLayouts::Qwerty => KeyCode::KeyA,
-            KeyboardLayouts::Dvorak => KeyCode::KeyA,
-            KeyboardLayouts::Colemak => KeyCode::KeyA,
-        }
+        self.dir(1).0
     }
-
     pub fn left_char(&self) -> char {
-        match self.physical_keyboard_layout {
-            KeyboardLayouts::Qwerty => 'a',
-            KeyboardLayouts::Dvorak => 'a',
-            KeyboardLayouts::Colemak => 'a',
-        }
+        self.dir(1).1
     }
-
     pub fn up(&self) -> KeyCode {
-        match self.physical_keyboard_layout {
-            KeyboardLayouts::Qwerty => KeyCode::KeyW,
-            KeyboardLayouts::Dvorak => KeyCode::Comma,
-            KeyboardLayouts::Colemak => KeyCode::KeyW,
-        }
+        self.dir(2).0
     }
-
     pub fn up_char(&self) -> char {
-        match self.physical_keyboard_layout {
-            KeyboardLayouts::Qwerty => 'w',
-            KeyboardLayouts::Dvorak => ',',
-            KeyboardLayouts::Colemak => 'w',
-        }
+        self.dir(2).1
     }
-
     pub fn down(&self) -> KeyCode {
-        match self.physical_keyboard_layout {
-            KeyboardLayouts::Qwerty => KeyCode::KeyS,
-            KeyboardLayouts::Dvorak => KeyCode::KeyO,
-            KeyboardLayouts::Colemak => KeyCode::KeyR,
-        }
+        self.dir(3).0
     }
-
     pub fn down_char(&self) -> char {
-        match self.physical_keyboard_layout {
-            KeyboardLayouts::Qwerty => 's',
-            KeyboardLayouts::Dvorak => 'o',
-            KeyboardLayouts::Colemak => 'r',
-        }
+        self.dir(3).1
     }
 
     pub fn keypool(&self) -> [char; 16] {

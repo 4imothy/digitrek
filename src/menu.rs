@@ -61,25 +61,27 @@ impl Label {
 }
 
 impl KeyboardLayouts {
-    fn right(&self, logical: bool) -> Label {
-        match (self, logical) {
-            (KeyboardLayouts::Qwerty, true) => Label::LogicalDvorak,
-            (KeyboardLayouts::Qwerty, false) => Label::PhysicalDvorak,
-            (KeyboardLayouts::Dvorak, true) => Label::LogicalColemak,
-            (KeyboardLayouts::Dvorak, false) => Label::PhysicalColemak,
-            (KeyboardLayouts::Colemak, true) => Label::LogicalQwerty,
-            (KeyboardLayouts::Colemak, false) => Label::PhysicalQwerty,
+    fn nav(&self, logical: bool, right: bool) -> Label {
+        match (self, logical, right) {
+            (KeyboardLayouts::Qwerty, false, false) => Label::PhysicalColemak,
+            (KeyboardLayouts::Qwerty, false, true) => Label::PhysicalDvorak,
+            (KeyboardLayouts::Qwerty, true, false) => Label::LogicalColemak,
+            (KeyboardLayouts::Qwerty, true, true) => Label::LogicalDvorak,
+            (KeyboardLayouts::Dvorak, false, false) => Label::PhysicalQwerty,
+            (KeyboardLayouts::Dvorak, false, true) => Label::PhysicalColemak,
+            (KeyboardLayouts::Dvorak, true, false) => Label::LogicalQwerty,
+            (KeyboardLayouts::Dvorak, true, true) => Label::LogicalColemak,
+            (KeyboardLayouts::Colemak, false, false) => Label::PhysicalDvorak,
+            (KeyboardLayouts::Colemak, false, true) => Label::PhysicalQwerty,
+            (KeyboardLayouts::Colemak, true, false) => Label::LogicalDvorak,
+            (KeyboardLayouts::Colemak, true, true) => Label::LogicalQwerty,
         }
     }
+    fn right(&self, logical: bool) -> Label {
+        self.nav(logical, true)
+    }
     fn left(&self, logical: bool) -> Label {
-        match (self, logical) {
-            (KeyboardLayouts::Dvorak, true) => Label::LogicalQwerty,
-            (KeyboardLayouts::Dvorak, false) => Label::PhysicalQwerty,
-            (KeyboardLayouts::Colemak, true) => Label::LogicalDvorak,
-            (KeyboardLayouts::Colemak, false) => Label::PhysicalDvorak,
-            (KeyboardLayouts::Qwerty, true) => Label::LogicalColemak,
-            (KeyboardLayouts::Qwerty, false) => Label::PhysicalColemak,
-        }
+        self.nav(logical, false)
     }
 }
 
@@ -92,6 +94,30 @@ fn button() -> Node {
         border: UiRect::all(Val::Vh(0.3)),
         border_radius: BorderRadius::MAX,
         ..default()
+    }
+}
+
+fn spawn_button(
+    cmd: &mut RelatedSpawnerCommands<ChildOf>,
+    action: Label,
+    text: &str,
+    selected: bool,
+) {
+    let mut e = cmd.spawn((
+        Button,
+        Node { ..button() },
+        BorderColor::all(colors::UNSELECTED_OUTLINE),
+        action,
+    ));
+    e.with_children(|p| {
+        p.spawn((
+            Text::new(text),
+            FONT.clone(),
+            TextColor(colors::BUTTON_TEXT),
+        ));
+    });
+    if selected {
+        e.insert(Selected);
     }
 }
 
@@ -121,7 +147,7 @@ pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
                                 rotation: Rot2::radians(angle),
                                 ..default()
                             },
-                            TextColor(colors::TITLE_POOL[i]),
+                            TextColor(colors::TITLE_CHARS[i]),
                             Node {
                                 padding: UiRect::horizontal(Val::Vh(1.)),
                                 ..default()
@@ -136,31 +162,12 @@ pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
                 TextColor(colors::LABEL),
             ));
 
-            for (action, label) in [
-                (Label::Play, "play"),
-                (Label::Help, "help"),
-                (Label::Settings, "settings"),
-                (Label::Credits, "credits"),
-                #[cfg(not(target_arch = "wasm32"))]
-                (Label::Quit, "quit"),
-            ] {
-                let mut entity = cmd.spawn((
-                    Button,
-                    Node { ..button() },
-                    BorderColor::all(colors::UNSELECTED_OUTLINE),
-                    action,
-                ));
-                entity.with_children(|parent| {
-                    parent.spawn((
-                        Text::new(label),
-                        FONT.clone(),
-                        TextColor(colors::BUTTON_TEXT),
-                    ));
-                });
-                if let Label::Play = action {
-                    entity.insert(Selected);
-                }
-            }
+            spawn_button(cmd, Label::Play, "play", true);
+            spawn_button(cmd, Label::Help, "help", false);
+            spawn_button(cmd, Label::Settings, "settings", false);
+            spawn_button(cmd, Label::Credits, "credits", false);
+            #[cfg(not(target_arch = "wasm32"))]
+            spawn_button(cmd, Label::Quit, "quit", false);
         });
 }
 
@@ -362,90 +369,30 @@ pub fn despawn_screen<T: Component>(screen: Single<Entity, With<T>>, mut command
 
 pub fn pause_setup(mut commands: Commands) {
     commands
-        .spawn((
-            PauseScreen,
-            Node {
-                padding: UiRect {
-                    left: Val::Percent(1.),
-                    right: Val::Percent(1.),
-                    top: Val::Percent(0.),
-                    bottom: Val::Percent(0.),
-                },
-                border_radius: BorderRadius::all(Val::Percent(5.)),
-                ..screen_node()
-            },
-            BackgroundColor(colors::IN_GAME_MENU),
-        ))
+        .spawn(ingame_screen(PauseScreen))
         .with_children(|cmd| {
             cmd.spawn((
                 Text::new("game is paused"),
                 TextLayout::new_with_justify(Justify::Center),
                 FONT.clone(),
             ));
-            for (action, label) in [
-                (Label::Resume, "resume"),
-                (Label::GameSettings, "settings"),
-                (Label::Back, "exit"),
-            ] {
-                let mut entity = cmd.spawn((
-                    Button,
-                    Node { ..button() },
-                    BorderColor::all(colors::UNSELECTED_OUTLINE),
-                    action,
-                ));
-                entity.with_children(|parent| {
-                    parent.spawn((
-                        Text::new(label),
-                        FONT.clone(),
-                        TextColor(colors::BUTTON_TEXT),
-                    ));
-                });
-                if let Label::Resume = action {
-                    entity.insert(Selected);
-                }
-            }
+            spawn_button(cmd, Label::Resume, "resume", true);
+            spawn_button(cmd, Label::GameSettings, "settings", false);
+            spawn_button(cmd, Label::Back, "exit", false);
         });
 }
 
 pub fn end_setup(mut commands: Commands, stats: Single<&mut Stats>) {
     commands
-        .spawn((
-            EndScreen,
-            Node {
-                padding: UiRect {
-                    left: Val::Percent(1.),
-                    right: Val::Percent(1.),
-                    top: Val::Percent(0.),
-                    bottom: Val::Percent(0.),
-                },
-                ..screen_node()
-            },
-            BackgroundColor(colors::IN_GAME_MENU),
-        ))
+        .spawn(ingame_screen(EndScreen))
         .with_children(|cmd| {
             cmd.spawn((
                 Text::new(format!("Game Over\nScore: {}", stats.score)),
                 TextLayout::new_with_justify(Justify::Center),
                 FONT.clone(),
             ));
-            for (action, label) in [(Label::PlayAgain, "play again"), (Label::Back, "exit")] {
-                let mut entity = cmd.spawn((
-                    Button,
-                    Node { ..button() },
-                    BorderColor::all(colors::UNSELECTED_OUTLINE),
-                    action,
-                ));
-                entity.with_children(|parent| {
-                    parent.spawn((
-                        Text::new(label),
-                        FONT.clone(),
-                        TextColor(colors::BUTTON_TEXT),
-                    ));
-                });
-                if let Label::PlayAgain = action {
-                    entity.insert(Selected);
-                }
-            }
+            spawn_button(cmd, Label::PlayAgain, "play again", true);
+            spawn_button(cmd, Label::Back, "exit", false);
         });
 }
 
@@ -499,56 +446,17 @@ pub fn help_setup(mut commands: Commands, config: Res<Config>) {
                     ..default()
                 },
             ));
-            screen
-                .spawn((
-                    Label::Back,
-                    Button,
-                    BorderColor::all(colors::UNSELECTED_OUTLINE),
-                    Node { ..button() },
-                    Selected,
-                ))
-                .with_children(|button| {
-                    button.spawn((
-                        Text::new("back"),
-                        FONT.clone(),
-                        TextColor(colors::BUTTON_TEXT),
-                    ));
-                });
+            spawn_button(screen, Label::Back, "back", true);
         });
 }
 
 pub fn game_settings_setup(mut commands: Commands, config: Res<Config>) {
-    commands
-        .spawn((
-            GameSettingsScreen,
-            Node {
-                padding: UiRect {
-                    left: Val::Percent(1.),
-                    right: Val::Percent(1.),
-                    top: Val::Percent(0.),
-                    bottom: Val::Percent(0.),
-                },
-                ..screen_node()
-            },
-            BackgroundColor(colors::IN_GAME_MENU.with_alpha(1.)),
-        ))
-        .with_children(|screen| {
-            add_volume(screen, &config);
-            screen
-                .spawn((
-                    Label::Back,
-                    Button,
-                    BorderColor::all(colors::UNSELECTED_OUTLINE),
-                    Node { ..button() },
-                ))
-                .with_children(|button| {
-                    button.spawn((
-                        Text::new("back"),
-                        FONT.clone(),
-                        TextColor(colors::BUTTON_TEXT),
-                    ));
-                });
-        });
+    let (c, n, mut bg) = ingame_screen(GameSettingsScreen);
+    bg.0 = colors::IN_GAME_MENU.with_alpha(1.);
+    commands.spawn((c, n, bg)).with_children(|s| {
+        add_volume(s, &config);
+        spawn_button(s, Label::Back, "back", false);
+    });
 }
 pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
     commands
@@ -686,20 +594,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                     ));
                 });
 
-            screen
-                .spawn((
-                    Label::Back,
-                    Button,
-                    BorderColor::all(colors::UNSELECTED_OUTLINE),
-                    Node { ..button() },
-                ))
-                .with_children(|button| {
-                    button.spawn((
-                        Text::new("back"),
-                        FONT.clone(),
-                        TextColor(colors::BUTTON_TEXT),
-                    ));
-                });
+            spawn_button(screen, Label::Back, "back", false);
         });
 }
 
@@ -746,67 +641,47 @@ pub fn credits_setup(mut commands: Commands) {
     commands
         .spawn(screen_with(CreditsScreen))
         .with_children(|screen| {
-            for (label, text) in [
-                (
-                    Label::ProgrammingLanguage,
-                    credits::PROGRAMMING_LANGUAGE_TEXT,
-                ),
-                (Label::GameEngine, credits::GAME_ENGINE_TEXT),
-                (Label::Palette, credits::PALETTE_TEXT),
-                (
-                    Label::LaunchProjectileSound,
-                    credits::LAUNCH_PROJECTILE_SOUND_TEXT,
-                ),
-                (Label::ExplosionSound, credits::EXPLOSION_SOUND_TEXT),
-                (Label::MistypeSound, credits::MISTYPE_SOUND_TEXT),
-                (Label::Source, credits::SOURCE_TEXT),
-            ] {
-                let mut ent = screen.spawn((
-                    label,
-                    Button,
-                    BorderColor::all(colors::UNSELECTED_OUTLINE),
-                    Node { ..button() },
-                ));
-                if let Label::ProgrammingLanguage = label {
-                    ent.insert(Selected);
-                }
-                ent.with_children(|button| {
-                    button.spawn((
-                        Text::new(text),
-                        FONT.clone(),
-                        TextColor(colors::BUTTON_TEXT),
-                    ));
-                });
-            }
-            screen
-                .spawn((
-                    Label::Back,
-                    Button,
-                    BorderColor::all(colors::UNSELECTED_OUTLINE),
-                    Node { ..button() },
-                ))
-                .with_children(|button| {
-                    button.spawn((
-                        Text::new("back"),
-                        FONT.clone(),
-                        TextColor(colors::BUTTON_TEXT),
-                    ));
-                });
+            spawn_button(
+                screen,
+                Label::ProgrammingLanguage,
+                credits::PROGRAMMING_LANGUAGE_TEXT,
+                true,
+            );
+            spawn_button(screen, Label::GameEngine, credits::GAME_ENGINE_TEXT, false);
+            spawn_button(screen, Label::Palette, credits::PALETTE_TEXT, false);
+            spawn_button(
+                screen,
+                Label::LaunchProjectileSound,
+                credits::LAUNCH_PROJECTILE_SOUND_TEXT,
+                false,
+            );
+            spawn_button(
+                screen,
+                Label::ExplosionSound,
+                credits::EXPLOSION_SOUND_TEXT,
+                false,
+            );
+            spawn_button(
+                screen,
+                Label::MistypeSound,
+                credits::MISTYPE_SOUND_TEXT,
+                false,
+            );
+            spawn_button(screen, Label::Source, credits::SOURCE_TEXT, false);
+            spawn_button(screen, Label::Back, "back", false);
         });
 }
 
 impl Config {
-    pub fn set_vol(&mut self, val: u8, global_volume: &mut ResMut<GlobalVolume>) {
+    pub fn set_vol(&mut self, val: u8, global_volume: &mut GlobalVolume) {
         self.volume = val;
         global_volume.volume = bevy::audio::Volume::Linear(self.volume as f32 / 100.);
     }
-    fn inc_vol(&mut self, val: u8, global_volume: &mut GlobalVolume) {
-        self.volume = (self.volume + val).min(100);
-        global_volume.volume = bevy::audio::Volume::Linear(self.volume as f32 / 100.);
+    fn inc_vol(&mut self, val: u8, gv: &mut GlobalVolume) {
+        self.set_vol((self.volume + val).min(100), gv);
     }
-    fn dec_vol(&mut self, val: u8, global_volume: &mut GlobalVolume) {
-        self.volume = self.volume.saturating_sub(val);
-        global_volume.volume = bevy::audio::Volume::Linear(self.volume as f32 / 100.);
+    fn dec_vol(&mut self, val: u8, gv: &mut GlobalVolume) {
+        self.set_vol(self.volume.saturating_sub(val), gv);
     }
 }
 
@@ -1148,6 +1023,18 @@ fn screen_node() -> Node {
     }
 }
 
-fn screen_with<T: Component>(component: T) -> (Node, T) {
-    (screen_node(), component)
+fn screen_with<T: Component>(c: T) -> (Node, T) {
+    (screen_node(), c)
+}
+
+fn ingame_screen<T: Component>(c: T) -> (T, Node, BackgroundColor) {
+    (
+        c,
+        Node {
+            padding: UiRect::axes(Val::Percent(1.), Val::Percent(0.)),
+            border_radius: BorderRadius::all(Val::Percent(5.)),
+            ..screen_node()
+        },
+        BackgroundColor(colors::IN_GAME_MENU),
+    )
 }

@@ -109,39 +109,28 @@ pub fn setup(
             Transform::from_xyz(0., 0., INDICATOR_Z_INDEX),
             Visibility::Hidden,
         ))
-        .with_children(|cmds| {
-            cmds.spawn((
-                Mesh2d(meshes.add(Rectangle::new(
-                    INDICATOR_LONG_RECTANGLE_LENGTH,
-                    INDICATOR_THICKNESS,
-                ))),
-                MeshMaterial2d(materials.add(colors::INDICATOR)),
-                Transform::from_xyz(-INDICATOR_RADIUS, 0., PLAYER_Z_INDEX),
+        .with_children(|c| {
+            let h = meshes.add(Rectangle::new(
+                INDICATOR_LONG_RECTANGLE_LENGTH,
+                INDICATOR_THICKNESS,
             ));
-            cmds.spawn((
-                Mesh2d(meshes.add(Rectangle::new(
-                    INDICATOR_LONG_RECTANGLE_LENGTH,
-                    INDICATOR_THICKNESS,
-                ))),
-                MeshMaterial2d(materials.add(colors::INDICATOR)),
-                Transform::from_xyz(INDICATOR_RADIUS, 0., PLAYER_Z_INDEX),
+            let v = meshes.add(Rectangle::new(
+                INDICATOR_THICKNESS,
+                INDICATOR_LONG_RECTANGLE_LENGTH,
             ));
-            cmds.spawn((
-                Mesh2d(meshes.add(Rectangle::new(
-                    INDICATOR_THICKNESS,
-                    INDICATOR_LONG_RECTANGLE_LENGTH,
-                ))),
-                MeshMaterial2d(materials.add(colors::INDICATOR)),
-                Transform::from_xyz(0., INDICATOR_RADIUS, PLAYER_Z_INDEX),
-            ));
-            cmds.spawn((
-                Mesh2d(meshes.add(Rectangle::new(
-                    INDICATOR_THICKNESS,
-                    INDICATOR_LONG_RECTANGLE_LENGTH,
-                ))),
-                MeshMaterial2d(materials.add(colors::INDICATOR)),
-                Transform::from_xyz(0., -INDICATOR_RADIUS, PLAYER_Z_INDEX),
-            ));
+            let mat = materials.add(colors::INDICATOR);
+            for (m, x, y) in [
+                (h.clone(), -INDICATOR_RADIUS, 0.),
+                (h, INDICATOR_RADIUS, 0.),
+                (v.clone(), 0., INDICATOR_RADIUS),
+                (v, 0., -INDICATOR_RADIUS),
+            ] {
+                c.spawn((
+                    Mesh2d(m),
+                    MeshMaterial2d(mat.clone()),
+                    Transform::from_xyz(x, y, PLAYER_Z_INDEX),
+                ));
+            }
         });
     commands.spawn((
         Node {
@@ -250,30 +239,15 @@ impl Foe {
     }
 
     pub fn mov_speed(&self) -> f32 {
-        match self.shape {
-            Shape::Triangle => TRIANGLE_MOVEMENT_SPEED,
-            Shape::Rhombus => RHOMBUS_MOVEMENT_SPEED,
-            Shape::Pentagon => PENTAGON_MOVEMENT_SPEED,
-            Shape::Hexagon => HEXAGON_MOVEMENT_SPEED,
-        }
+        SHAPE_MOV_SPEEDS[self.shape.id()]
     }
 
     pub fn rot_speed(&self) -> f32 {
-        match self.shape {
-            Shape::Triangle => TRIANGLE_ROTATION_SPEED,
-            Shape::Rhombus => RHOMBUS_ROTATION_SPEED,
-            Shape::Pentagon => PENTAGON_ROTATION_SPEED,
-            Shape::Hexagon => HEXAGON_ROTATION_SPEED,
-        }
+        SHAPE_ROT_SPEEDS[self.shape.id()]
     }
 
     pub fn num_points(&self) -> usize {
-        match self.shape {
-            Shape::Triangle => 3,
-            Shape::Rhombus => 4,
-            Shape::Pentagon => 5,
-            Shape::Hexagon => 6,
-        }
+        self.shape.id() + 3
     }
 }
 

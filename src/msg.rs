@@ -185,45 +185,32 @@ fn spawn_explosion(
     }
 }
 
-fn add_text(
-    commands: &mut EntityCommands,
-    keys: &[char],
-    to_show: usize,
-    cleared: usize,
-    next_index: usize,
-) {
-    commands.with_children(|commands| {
+fn text_color(i: usize, next: usize) -> TextColor {
+    TextColor(if next == i {
+        colors::TEXT_NEXT
+    } else if next > i {
+        colors::TEXT_DONE
+    } else {
+        colors::TEXT_FUTURE
+    })
+}
+
+fn add_text(cmd: &mut EntityCommands, keys: &[char], to_show: usize, cleared: usize, next: usize) {
+    cmd.with_children(|c| {
         let mut iter = keys.iter().enumerate().skip(cleared).take(to_show);
-        if let Some((i, &char)) = iter.next() {
-            commands
-                .spawn((
-                    Text2d::new(char),
-                    TextLayout::default(),
-                    FONT.clone(),
-                    TextColor(if next_index == i {
-                        colors::TEXT_NEXT
-                    } else if next_index > i {
-                        colors::TEXT_DONE
-                    } else {
-                        colors::TEXT_FUTURE
-                    }),
-                    EnemyText,
-                ))
-                .with_children(|commands| {
-                    for (i, &c) in iter {
-                        commands.spawn((
-                            TextSpan::new(c),
-                            TextColor(if next_index == i {
-                                colors::TEXT_NEXT
-                            } else if next_index > i {
-                                colors::TEXT_DONE
-                            } else {
-                                colors::TEXT_FUTURE
-                            }),
-                            FONT.clone(),
-                        ));
-                    }
-                });
+        if let Some((i, &ch)) = iter.next() {
+            c.spawn((
+                Text2d::new(ch),
+                TextLayout::default(),
+                FONT.clone(),
+                text_color(i, next),
+                EnemyText,
+            ))
+            .with_children(|c| {
+                for (i, &ch) in iter {
+                    c.spawn((TextSpan::new(ch), text_color(i, next), FONT.clone()));
+                }
+            });
         }
     });
 }
@@ -240,11 +227,13 @@ fn spawn_foe(
     config: &Config,
     viewport_width: f32,
 ) {
-    let (mesh, color, num_keys) = match shape {
-        Shape::Triangle => (meshes.add(TRIANGLE), colors::TRIANGLE, TRIANGLE_NUM_KEYS),
-        Shape::Rhombus => (meshes.add(RHOMBUS), colors::RHOMBUS, RHOMBUS_NUM_KEYS),
-        Shape::Pentagon => (meshes.add(PENTAGON), colors::PENTAGON, PENTAGON_NUM_KEYS),
-        Shape::Hexagon => (meshes.add(HEXAGON), colors::HEXAGON, HEXAGON_NUM_KEYS),
+    let num_keys = SHAPE_NUM_KEYS[shape.id()];
+    let color = colors::SHAPE_COLORS[shape.id()];
+    let mesh = match shape {
+        Shape::Triangle => meshes.add(TRIANGLE),
+        Shape::Rhombus => meshes.add(RHOMBUS),
+        Shape::Pentagon => meshes.add(PENTAGON),
+        Shape::Hexagon => meshes.add(HEXAGON),
     };
 
     let z_index = match shape {
@@ -344,10 +333,11 @@ fn replace_shape(
     entity: Entity,
     shape: &Shape,
 ) {
-    let (mesh, color) = match shape {
-        Shape::Triangle => (meshes.add(TRIANGLE), materials.add(colors::TRIANGLE)),
-        Shape::Rhombus => (meshes.add(RHOMBUS), materials.add(colors::RHOMBUS)),
-        Shape::Pentagon => (meshes.add(PENTAGON), materials.add(colors::PENTAGON)),
+    let color = materials.add(colors::SHAPE_COLORS[shape.id()]);
+    let mesh = match shape {
+        Shape::Triangle => meshes.add(TRIANGLE),
+        Shape::Rhombus => meshes.add(RHOMBUS),
+        Shape::Pentagon => meshes.add(PENTAGON),
         Shape::Hexagon => unreachable!(),
     };
     let mut ent_cmds = commands.entity(entity);
