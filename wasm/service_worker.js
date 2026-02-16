@@ -8,10 +8,6 @@ const PRECACHE_ASSETS = [
     './digitrek.js',
     './digitrek_bg.wasm',
     './restart_audio_context.js',
-    './assets/explosion.ogg',
-    './assets/pop.ogg',
-    './assets/projectile_launch.ogg',
-    './assets/unmatched_keypress.ogg',
 ];
 
 self.addEventListener('install', event => {

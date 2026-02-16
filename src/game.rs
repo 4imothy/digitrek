@@ -8,15 +8,15 @@ use bevy::{
     },
     prelude::*,
 };
-use core::f32;
 use rand::{self, Rng, distr::Distribution};
+use std::sync::Arc;
 
 pub fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut vtime: ResMut<Time<Virtual>>,
-    asset_server: Res<AssetServer>,
+    mut audio: ResMut<Assets<AudioSource>>,
 ) {
     vtime.set_relative_speed(TIME_MULTIPLIER);
     let mut launcher_mesh = Mesh::new(
@@ -140,7 +140,7 @@ pub fn setup(
             ..default()
         },
         Text::new("0"),
-        FONT.clone(),
+        text_font(),
         Stats {
             score: 0,
             running: true,
@@ -154,9 +154,15 @@ pub fn setup(
         last_side: 0,
     });
     commands.insert_resource(AudioAssets {
-        projectile_launch: asset_server.load("projectile_launch.ogg"),
-        unmatched_keypress: asset_server.load("unmatched_keypress.ogg"),
-        explosion: asset_server.load("explosion.ogg"),
+        projectile_launch: audio.add(AudioSource {
+            bytes: Arc::from(*include_bytes!("../assets/projectile_launch.ogg")),
+        }),
+        unmatched_keypress: audio.add(AudioSource {
+            bytes: Arc::from(*include_bytes!("../assets/unmatched_keypress.ogg")),
+        }),
+        explosion: audio.add(AudioSource {
+            bytes: Arc::from(*include_bytes!("../assets/explosion.ogg")),
+        }),
     });
     commands.insert_resource(Clock(0.));
 }
@@ -272,7 +278,7 @@ pub fn keypress(
     mut msg: MessageWriter<GameMsg>,
     mut audio: MessageWriter<AudioMsg>,
     mut evr_kbd: MessageReader<KeyboardInput>,
-    player: Single<(&mut Player, &Transform), (With<Player>, Without<PlayerLauncher>)>,
+    player: Single<(&mut Player, &Transform), Without<PlayerLauncher>>,
     launcher: Single<&mut Transform, (With<PlayerLauncher>, Without<Player>)>,
     indicator: Single<Entity, (With<Indicator>, Without<Player>)>,
     mut enemy_query: Query<
@@ -483,8 +489,8 @@ pub fn summoner_foe(
             bounce_movement(&mut foe, &mut transform, dt);
         }
 
-        let player_pos = player.translation.truncate();
-        let pos = transform.translation.truncate();
+        let player_pos = player.translation.xy();
+        let pos = transform.translation.xy();
 
         let rel = pos - player_pos;
         let dist = rel.length();
@@ -731,13 +737,13 @@ pub fn projectile(
         {
             let e_points: &[Vec3] = points!(targeted_enemy.shape, target_transform);
             let direction = (target_transform.translation - projectile_transform.translation)
-                .truncate()
+                .xy()
                 .normalize_or_zero();
             projectile_transform.translation +=
                 direction.extend(0.) * PROJECTILE_MOVEMENT_SPEED * time.delta_secs();
 
             if circle_polygon_collide(
-                projectile_transform.translation.truncate(),
+                projectile_transform.translation.xy(),
                 PROJECTILE_RADIUS,
                 e_points,
             )
@@ -777,11 +783,11 @@ pub fn projectile(
 }
 
 fn project_onto_axis(polygon: &[Vec3], axis: Vec2) -> (f32, f32) {
-    let mut min = polygon[0].truncate().dot(axis);
+    let mut min = polygon[0].xy().dot(axis);
     let mut max = min;
 
     for vertex in polygon.iter().skip(1) {
-        let proj = vertex.truncate().dot(axis);
+        let proj = vertex.xy().dot(axis);
         min = min.min(proj);
         max = max.max(proj);
     }
@@ -896,8 +902,8 @@ fn closest_point_on_polygon(point: Vec2, polygon: &[Vec3]) -> Option<Vec2> {
     let mut min_dist_sq = f32::INFINITY;
 
     for (p1, p2) in polygon.iter().zip(polygon.iter().cycle().skip(1)) {
-        let a = p1.truncate();
-        let b = p2.truncate();
+        let a = p1.xy();
+        let b = p2.xy();
         let closest_point = closest_point_on_segment(point, a, b);
         let dist_sq = (point - closest_point).length_squared();
 
@@ -1043,7 +1049,7 @@ pub fn player_collisions(
 
     for o_transform in obstacles.iter_mut() {
         if circle_polygon_collide(
-            o_transform.translation.truncate(),
+            o_transform.translation.xy(),
             OBSTACLE_RADIUS,
             &player_points,
         )
@@ -1207,7 +1213,7 @@ pub fn obstacle_collisions(
             let e_points: &[Vec3] = points!(e.shape, e_transform);
             if !e.colliding
                 && let Some(normal) = circle_polygon_collide(
-                    o_transform.translation.truncate(),
+                    o_transform.translation.xy(),
                     OBSTACLE_RADIUS,
                     e_points,
                 )

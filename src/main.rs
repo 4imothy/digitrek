@@ -7,13 +7,8 @@ mod credits;
 mod game;
 mod menu;
 mod msg;
-use bevy::{
-    asset::{AssetMetaCheck, RenderAssetUsages},
-    input::common_conditions::input_just_pressed,
-    prelude::*,
-};
+use bevy::{asset::RenderAssetUsages, input::common_conditions::input_just_pressed, prelude::*};
 use bevy_pkv::PkvStore;
-use core::f32;
 use rand::distr::weighted::WeightedIndex;
 use serde::{Deserialize, Serialize};
 use std::{f32::consts::PI, sync::LazyLock};
@@ -25,7 +20,7 @@ const MIN_DELAY: bool = cfg!(feature = "min_delay");
 const TIME_MULTIPLIER: f32 = 1.;
 
 const PLAYER_RADIUS: f32 = 50.;
-const FOE_SIZE: f32 = PLAYER_RADIUS * 1.2;
+const FOE_SIZE: f32 = PLAYER_RADIUS * 1.4;
 const OBSTACLE_RADIUS: f32 = PLAYER_RADIUS / 3.;
 const PROJECTILE_RADIUS: f32 = PLAYER_RADIUS / 10.;
 const INDICATOR_THICKNESS: f32 = PLAYER_RADIUS / 10.;
@@ -88,7 +83,7 @@ const SUMMONER_COLLISION_PADDING: f32 = PLAYER_RADIUS / 2.;
 const SUMMONER_ORBIT_RADIUS: f32 = PLAYER_RADIUS * 7.;
 const COS_MIN_LEADING_VERTEX_ALIGNMENT: f32 = 0.3;
 
-const TRIANGLE_CENTERING_OFFSET_Y: f32 = PLAYER_RADIUS / 2.5;
+const TRIANGLE_CENTERING_OFFSET_Y: f32 = FOE_SIZE / 3.;
 const TRIANGLE_LOCAL_POINTS: [Vec3; 3] = [
     Vec3::new(0., FOE_SIZE - TRIANGLE_CENTERING_OFFSET_Y, 0.),
     Vec3::new(FOE_SIZE / 2., -TRIANGLE_CENTERING_OFFSET_Y, 0.),
@@ -158,14 +153,6 @@ const PLAYER_Z_INDEX: f32 = 5.;
 const INDICATOR_Z_INDEX: f32 = 6.;
 const VIEWPORT_HEIGHT: f32 = 1000.;
 
-static TITLE_FONT: LazyLock<TextFont> = LazyLock::new(|| TextFont {
-    font_size: 80.,
-    ..default()
-});
-static FONT: LazyLock<TextFont> = LazyLock::new(|| TextFont {
-    font_size: 30.,
-    ..default()
-});
 const SCORE_TEXT_PADDING: f32 = 10.;
 
 const EXPLOSION_PARTICLE_MAX_LIFETIME: f32 = 1.;
@@ -219,14 +206,15 @@ mod colors {
         [GREEN, PINK, ORANGE, PINK, YELLOW, PURPLE, CYAN, RED];
 }
 
-const KEY_REPEAT_DELAY: f32 = 0.4;
-const KEY_REPEAT_INTERVAL: f32 = 0.1;
+const PRESS_REPEAT_DELAY: f32 = 0.4;
+const PRESS_REPEAT_INTERVAL: f32 = 0.1;
 
+const LEN_KEY_POOL: usize = 28;
 #[rustfmt::skip]
-const QWERTY_POOL: [char; 16] = [
-    'y', 'u', 'i', 'o', 'p',
-    'h', 'j', 'k', 'l', ';', '\'',
-    'n', 'm', ',', '.', '/',
+const QWERTY_POOL: [char; LEN_KEY_POOL] = [
+    'q',/*w*/ 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[',
+   /*a*//*s*//*d*/ 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'',
+    'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/',
 ];
 const QWERTY_MOVEMENT: [(KeyCode, char); 4] = [
     (KeyCode::KeyD, 'd'),
@@ -236,10 +224,10 @@ const QWERTY_MOVEMENT: [(KeyCode, char); 4] = [
 ];
 
 #[rustfmt::skip]
-const DVORAK_POOL: [char; 16] = [
-    'f', 'g', 'c', 'r', 'l',
-    'd', 'h', 't', 'n', 's', '-',
-    'b', 'm', 'w', 'v', 'z',
+const DVORAK_POOL: [char; LEN_KEY_POOL] = [
+     '\'',/*,*/ '.', 'p', 'y', 'f', 'g', 'c', 'r', 'l', '/',
+     /*a*//*o*//*e*/ 'u', 'i', 'd', 'h', 't', 'n', 's', '-',
+      ';', 'q', 'j', 'k', 'x', 'b', 'm', 'w', 'v', 'z',
 ];
 const DVORAK_MOVEMENT: [(KeyCode, char); 4] = [
     (KeyCode::KeyE, 'e'),
@@ -249,10 +237,10 @@ const DVORAK_MOVEMENT: [(KeyCode, char); 4] = [
 ];
 
 #[rustfmt::skip]
-const COLEMAK_POOL: [char; 16] = [
-    'j', 'l', 'u', 'y', ';',
-    'h', 'n', 'e', 'i', 'o', '\'',
-    'k', 'm', ',', '.', '/',
+const COLEMAK_POOL: [char; LEN_KEY_POOL] = [
+    'q',/*w*/ 'f', 'p', 'g', 'j', 'l', 'u', 'y', ';', '[',
+   /*a*//*r*//*s*/ 't', 'd', 'h', 'n', 'e', 'i', 'o', '\'',
+    'z', 'x', 'c', 'v', 'b', 'k', 'm', ',', '.', '/',
 ];
 const COLEMAK_MOVEMENT: [(KeyCode, char); 4] = [
     (KeyCode::KeyS, 's'),
@@ -328,7 +316,7 @@ impl Config {
         self.dir(3).1
     }
 
-    pub fn keypool(&self) -> [char; 16] {
+    pub fn keypool(&self) -> [char; LEN_KEY_POOL] {
         match self.logical_keyboard_layout {
             KeyboardLayouts::Qwerty => QWERTY_POOL,
             KeyboardLayouts::Dvorak => DVORAK_POOL,
@@ -348,18 +336,13 @@ fn main() {
     let mut pkv = PkvStore::new("timware", env!("CARGO_PKG_NAME"));
     App::new()
         .add_plugins((
-            DefaultPlugins
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: env!("CARGO_PKG_NAME").to_string(),
-                        ..default()
-                    }),
-                    ..default()
-                })
-                .set(AssetPlugin {
-                    meta_check: AssetMetaCheck::Never,
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: env!("CARGO_PKG_NAME").to_string(),
                     ..default()
                 }),
+                ..default()
+            }),
             menu_plugin,
             game_plugin,
         ))
@@ -388,7 +371,10 @@ fn setup(
     mut commands: Commands,
     mut config: ResMut<Config>,
     mut global_volume: ResMut<GlobalVolume>,
+    mut fonts: ResMut<Assets<Font>>,
 ) {
+    let font = Font::try_from_bytes(include_bytes!("../assets/font.ttf").to_vec()).unwrap();
+    let _ = fonts.insert(Handle::<Font>::default().id(), font);
     commands.spawn((
         Camera2d,
         Projection::from(OrthographicProjection {
@@ -591,9 +577,6 @@ struct GameSettingsScreen;
 struct EndScreen;
 
 #[derive(Component)]
-struct ResumeCountdownScreen;
-
-#[derive(Component)]
 struct CreditsScreen;
 
 #[derive(Component)]
@@ -719,6 +702,22 @@ struct AudioAssets {
     pub projectile_launch: Handle<AudioSource>,
     pub unmatched_keypress: Handle<AudioSource>,
     pub explosion: Handle<AudioSource>,
+}
+
+pub fn text_font() -> TextFont {
+    TextFont::default().with_font_size(30.)
+}
+
+pub fn foe_font() -> TextFont {
+    TextFont::default().with_font_size(35.)
+}
+
+pub fn small_font() -> TextFont {
+    TextFont::default().with_font_size(25.)
+}
+
+pub fn title_font() -> TextFont {
+    TextFont::default().with_font_size(80.)
 }
 
 #[derive(Message)]
@@ -854,8 +853,8 @@ impl KeyState {
             self.should_repeat = false;
         } else if held {
             self.held_time += dt;
-            self.should_repeat = self.held_time >= KEY_REPEAT_DELAY
-                && self.held_time - self.last_repeat >= KEY_REPEAT_INTERVAL;
+            self.should_repeat = self.held_time >= PRESS_REPEAT_DELAY
+                && self.held_time - self.last_repeat >= PRESS_REPEAT_INTERVAL;
             if self.should_repeat {
                 self.last_repeat = self.held_time;
             }

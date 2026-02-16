@@ -2,7 +2,6 @@
 
 use crate::*;
 use bevy::{ecs::relationship::RelatedSpawnerCommands, prelude::*, ui::RelativeCursorPosition};
-use core::f32;
 
 const VOLUME_LABEL_PREFIX: &str = "volume:";
 
@@ -27,6 +26,9 @@ pub enum Label {
     LaunchProjectileSound,
     ExplosionSound,
     MistypeSound,
+    SpaceMono,
+    FontForge,
+    FFmpeg,
     Source,
     Help,
     Resume,
@@ -54,6 +56,9 @@ impl Label {
             Label::LaunchProjectileSound => credits::LAUNCH_PROJECTILE_SOUND_LINK,
             Label::ExplosionSound => credits::EXPLOSION_SOUND_LINK,
             Label::MistypeSound => credits::MISTYPE_SOUND_LINK,
+            Label::SpaceMono => credits::SPACE_GROTESK_LINK,
+            Label::FontForge => credits::FONTFORGE_LINK,
+            Label::FFmpeg => credits::FFMPEG_LINK,
             Label::Source => credits::SOURCE_LINK,
             _ => unreachable!(),
         }
@@ -102,19 +107,16 @@ fn spawn_button(
     action: Label,
     text: &str,
     selected: bool,
+    font: TextFont,
 ) {
     let mut e = cmd.spawn((
         Button,
-        Node { ..button() },
+        button(),
         BorderColor::all(colors::UNSELECTED_OUTLINE),
         action,
     ));
     e.with_children(|p| {
-        p.spawn((
-            Text::new(text),
-            FONT.clone(),
-            TextColor(colors::BUTTON_TEXT),
-        ));
+        p.spawn((Text::new(text), font, TextColor(colors::BUTTON_TEXT)));
     });
     if selected {
         e.insert(Selected);
@@ -122,6 +124,8 @@ fn spawn_button(
 }
 
 pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
+    let title_font = title_font();
+    let font = text_font();
     commands
         .spawn(screen_with(MenuScreen))
         .with_children(|cmd| {
@@ -141,7 +145,7 @@ pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
                         let angle = angle_start + t * angle_span;
                         title.spawn((
                             Text::new(c),
-                            TITLE_FONT.clone(),
+                            title_font.clone(),
                             UiTransform {
                                 translation: Val2::new(Val::ZERO, Val::Vh(-10. * (t * PI).sin())),
                                 rotation: Rot2::radians(angle),
@@ -158,16 +162,16 @@ pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
 
             cmd.spawn((
                 Text::new(format!("highscore: {}", config.high_score)),
-                FONT.clone(),
+                font.clone(),
                 TextColor(colors::LABEL),
             ));
 
-            spawn_button(cmd, Label::Play, "play", true);
-            spawn_button(cmd, Label::Help, "help", false);
-            spawn_button(cmd, Label::Settings, "settings", false);
-            spawn_button(cmd, Label::Credits, "credits", false);
+            spawn_button(cmd, Label::Play, "start", true, font.clone());
+            spawn_button(cmd, Label::Help, "help", false, font.clone());
+            spawn_button(cmd, Label::Settings, "settings", false, font.clone());
+            spawn_button(cmd, Label::Credits, "credits", false, font.clone());
             #[cfg(not(target_arch = "wasm32"))]
-            spawn_button(cmd, Label::Quit, "quit", false);
+            spawn_button(cmd, Label::Quit, "quit", false, font.clone());
         });
 }
 
@@ -333,6 +337,9 @@ fn do_action(
         | Label::LaunchProjectileSound
         | Label::ExplosionSound
         | Label::MistypeSound
+        | Label::SpaceMono
+        | Label::FontForge
+        | Label::FFmpeg
         | Label::Source => {
             #[cfg(not(target_arch = "wasm32"))]
             let _ = open::that(action.to_link());
@@ -368,37 +375,38 @@ pub fn despawn_screen<T: Component>(screen: Single<Entity, With<T>>, mut command
 }
 
 pub fn pause_setup(mut commands: Commands) {
+    let font = text_font();
     commands
         .spawn(ingame_screen(PauseScreen))
         .with_children(|cmd| {
             cmd.spawn((
                 Text::new("game is paused"),
                 TextLayout::new_with_justify(Justify::Center),
-                FONT.clone(),
+                font.clone(),
             ));
-            spawn_button(cmd, Label::Resume, "resume", true);
-            spawn_button(cmd, Label::GameSettings, "settings", false);
-            spawn_button(cmd, Label::Back, "exit", false);
+            spawn_button(cmd, Label::Resume, "resume", true, font.clone());
+            spawn_button(cmd, Label::GameSettings, "settings", false, font.clone());
+            spawn_button(cmd, Label::Back, "exit", false, font.clone());
         });
 }
 
 pub fn end_setup(mut commands: Commands, stats: Single<&mut Stats>) {
+    let font = text_font();
     commands
         .spawn(ingame_screen(EndScreen))
         .with_children(|cmd| {
             cmd.spawn((
-                Text::new(format!("Game Over\nScore: {}", stats.score)),
+                Text::new(format!("game over\nscore: {}", stats.score)),
                 TextLayout::new_with_justify(Justify::Center),
-                FONT.clone(),
+                font.clone(),
             ));
-            spawn_button(cmd, Label::PlayAgain, "play again", true);
-            spawn_button(cmd, Label::Back, "exit", false);
+            spawn_button(cmd, Label::PlayAgain, "play again", true, font.clone());
+            spawn_button(cmd, Label::Back, "exit", false, font.clone());
         });
 }
 
 pub fn resume_countdown_setup(mut commands: Commands) {
     commands.spawn((
-        ResumeCountdownScreen,
         ResumeCountdown {
             counter: TIME_BEFORE_RESUME,
             displayed: TIME_BEFORE_RESUME as usize,
@@ -419,12 +427,13 @@ pub fn resume_countdown_setup(mut commands: Commands) {
         },
         BackgroundColor(colors::IN_GAME_MENU),
         Text::new((TIME_BEFORE_RESUME as usize).to_string()),
-        FONT.clone(),
+        text_font(),
         TextLayout::new_with_justify(Justify::Center),
     ));
 }
 
 pub fn help_setup(mut commands: Commands, config: Res<Config>) {
+    let font = text_font();
     commands
         .spawn(screen_with(HelpScreen))
         .with_children(|screen| {
@@ -439,26 +448,28 @@ pub fn help_setup(mut commands: Commands, config: Res<Config>) {
                     down = config.down_char(),
                     right = config.right_char(),
                 )),
-                FONT.clone(),
+                font.clone(),
                 TextColor(colors::LABEL),
                 TextLayout {
                     justify: Justify::Center,
                     ..default()
                 },
             ));
-            spawn_button(screen, Label::Back, "back", true);
+            spawn_button(screen, Label::Back, "back", true, font.clone());
         });
 }
 
 pub fn game_settings_setup(mut commands: Commands, config: Res<Config>) {
+    let font = text_font();
     let (c, n, mut bg) = ingame_screen(GameSettingsScreen);
     bg.0 = colors::IN_GAME_MENU.with_alpha(1.);
     commands.spawn((c, n, bg)).with_children(|s| {
         add_volume(s, &config);
-        spawn_button(s, Label::Back, "back", false);
+        spawn_button(s, Label::Back, "back", false, font.clone());
     });
 }
 pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
+    let font = text_font();
     commands
         .spawn(screen_with(SettingsScreen))
         .with_children(|screen| {
@@ -469,7 +480,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                     ..default()
                 },
                 Text::new("keyboard layout"),
-                FONT.clone(),
+                font.clone(),
                 TextColor(colors::LABEL),
             ));
 
@@ -519,6 +530,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
             ];
 
             for (group_label, group_text, buttons) in layout_groups {
+                let font = font.clone();
                 screen
                     .spawn((
                         group_label,
@@ -532,11 +544,12 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                     .with_children(|row| {
                         row.spawn((
                             Text::new(group_text),
-                            FONT.clone(),
+                            font.clone(),
                             TextColor(colors::LABEL),
                         ));
 
                         for (button_label, button_text, active) in buttons {
+                            let font = font.clone();
                             let mut option = row.spawn((
                                 Button,
                                 button_label,
@@ -550,7 +563,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                             option.with_children(|b| {
                                 b.spawn((
                                     Text::new(button_text),
-                                    FONT.clone(),
+                                    font,
                                     TextColor(colors::BUTTON_TEXT),
                                 ));
                             });
@@ -571,7 +584,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                 .with_children(|button| {
                     button.spawn((
                         Text::new("max difficulty"),
-                        FONT.clone(),
+                        font.clone(),
                         TextColor(colors::BUTTON_TEXT),
                         TextLayout::new_with_no_wrap(),
                     ));
@@ -594,7 +607,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                     ));
                 });
 
-            spawn_button(screen, Label::Back, "back", false);
+            spawn_button(screen, Label::Back, "back", false, font.clone());
         });
 }
 
@@ -605,7 +618,7 @@ fn add_volume(par: &mut RelatedSpawnerCommands<ChildOf>, config: &Config) {
             ..default()
         },
         Text::new(format!("{} {}", VOLUME_LABEL_PREFIX, config.volume)),
-        FONT.clone(),
+        text_font(),
         TextColor(colors::LABEL),
         VolumeDisplay,
     ));
@@ -638,37 +651,132 @@ fn add_volume(par: &mut RelatedSpawnerCommands<ChildOf>, config: &Config) {
 }
 
 pub fn credits_setup(mut commands: Commands) {
+    let title_font = text_font();
+    let font = small_font();
     commands
         .spawn(screen_with(CreditsScreen))
         .with_children(|screen| {
+            screen
+                .spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Start,
+                    ..default()
+                })
+                .with_children(|row| {
+                    row.spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    })
+                    .with_children(|col| {
+                        col.spawn((
+                            Text::new("tools"),
+                            title_font.clone(),
+                            TextColor(colors::LABEL),
+                            Node {
+                                margin: UiRect::bottom(Val::Vh(1.)),
+                                ..default()
+                            },
+                        ));
+                        spawn_button(
+                            col,
+                            Label::ProgrammingLanguage,
+                            credits::PROGRAMMING_LANGUAGE_TEXT,
+                            true,
+                            font.clone(),
+                        );
+                        spawn_button(
+                            col,
+                            Label::GameEngine,
+                            credits::GAME_ENGINE_TEXT,
+                            false,
+                            font.clone(),
+                        );
+                        spawn_button(
+                            col,
+                            Label::FontForge,
+                            credits::FONTFORGE_TEXT,
+                            false,
+                            font.clone(),
+                        );
+                        spawn_button(
+                            col,
+                            Label::FFmpeg,
+                            credits::FFMPEG_TEXT,
+                            false,
+                            font.clone(),
+                        );
+                    });
+                    row.spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    })
+                    .with_children(|col| {
+                        col.spawn((
+                            Text::new("assets"),
+                            title_font.clone(),
+                            TextColor(colors::LABEL),
+                            Node {
+                                margin: UiRect::bottom(Val::Vh(1.)),
+                                ..default()
+                            },
+                        ));
+                        spawn_button(
+                            col,
+                            Label::SpaceMono,
+                            credits::SPACE_GROTESK_TEXT,
+                            false,
+                            font.clone(),
+                        );
+                        spawn_button(
+                            col,
+                            Label::Palette,
+                            credits::PALETTE_TEXT,
+                            false,
+                            font.clone(),
+                        );
+                        col.spawn((
+                            Text::new("sounds"),
+                            title_font.clone(),
+                            TextColor(colors::LABEL),
+                            Node {
+                                margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Vh(2.), Val::Vh(1.)),
+                                ..default()
+                            },
+                        ));
+                        spawn_button(
+                            col,
+                            Label::LaunchProjectileSound,
+                            credits::LAUNCH_PROJECTILE_SOUND_TEXT,
+                            false,
+                            font.clone(),
+                        );
+                        spawn_button(
+                            col,
+                            Label::ExplosionSound,
+                            credits::EXPLOSION_SOUND_TEXT,
+                            false,
+                            font.clone(),
+                        );
+                        spawn_button(
+                            col,
+                            Label::MistypeSound,
+                            credits::MISTYPE_SOUND_TEXT,
+                            false,
+                            font.clone(),
+                        );
+                    });
+                });
             spawn_button(
                 screen,
-                Label::ProgrammingLanguage,
-                credits::PROGRAMMING_LANGUAGE_TEXT,
-                true,
-            );
-            spawn_button(screen, Label::GameEngine, credits::GAME_ENGINE_TEXT, false);
-            spawn_button(screen, Label::Palette, credits::PALETTE_TEXT, false);
-            spawn_button(
-                screen,
-                Label::LaunchProjectileSound,
-                credits::LAUNCH_PROJECTILE_SOUND_TEXT,
+                Label::Source,
+                credits::SOURCE_TEXT,
                 false,
+                font.clone(),
             );
-            spawn_button(
-                screen,
-                Label::ExplosionSound,
-                credits::EXPLOSION_SOUND_TEXT,
-                false,
-            );
-            spawn_button(
-                screen,
-                Label::MistypeSound,
-                credits::MISTYPE_SOUND_TEXT,
-                false,
-            );
-            spawn_button(screen, Label::Source, credits::SOURCE_TEXT, false);
-            spawn_button(screen, Label::Back, "back", false);
+            spawn_button(screen, Label::Back, "back", false, font.clone());
         });
 }
 
@@ -808,74 +916,95 @@ pub fn keypress_navigate(
             _ => {}
         }
     }
-    let direction = if down_active {
+    let v_dir = if down_active {
         1
     } else if up_active {
         -1
     } else {
         0
     };
+    let h_dir = if right_active {
+        1
+    } else if left_active {
+        -1
+    } else {
+        0
+    };
 
-    let next_selection = match (selected_label, direction) {
-        (Label::Play, 1) => Some(Label::Help),
-        (Label::Play, -1) => {
+    let next_selection = match (selected_label, v_dir, h_dir) {
+        (Label::ProgrammingLanguage, 0, 1) => Some(Label::SpaceMono),
+        (Label::SpaceMono, 0, -1) => Some(Label::ProgrammingLanguage),
+        (Label::GameEngine, 0, 1) => Some(Label::Palette),
+        (Label::Palette, 0, -1) => Some(Label::GameEngine),
+        (Label::FontForge, 0, 1) => Some(Label::LaunchProjectileSound),
+        (Label::LaunchProjectileSound, 0, -1) => Some(Label::FontForge),
+        (Label::FFmpeg, 0, 1) => Some(Label::ExplosionSound),
+        (Label::ExplosionSound, 0, -1) => Some(Label::FFmpeg),
+        (Label::Play, 1, _) => Some(Label::Help),
+        (Label::Play, -1, _) => {
             if cfg!(target_arch = "wasm32") {
                 Some(Label::Credits)
             } else {
                 Some(Label::Quit)
             }
         }
-        (Label::Help, 1) => Some(Label::Settings),
-        (Label::Help, -1) => Some(Label::Play),
-        (Label::Settings, 1) => Some(Label::Credits),
-        (Label::Settings, -1) => Some(Label::Help),
-        (Label::Credits, 1) => {
+        (Label::Help, 1, _) => Some(Label::Settings),
+        (Label::Help, -1, _) => Some(Label::Play),
+        (Label::Settings, 1, _) => Some(Label::Credits),
+        (Label::Settings, -1, _) => Some(Label::Help),
+        (Label::Credits, 1, _) => {
             if cfg!(target_arch = "wasm32") {
                 Some(Label::Play)
             } else {
                 Some(Label::Quit)
             }
         }
-        (Label::Credits, -1) => Some(Label::Settings),
+        (Label::Credits, -1, _) => Some(Label::Settings),
         #[cfg(not(target_arch = "wasm32"))]
-        (Label::Quit, 1) => Some(Label::Play),
+        (Label::Quit, 1, _) => Some(Label::Play),
         #[cfg(not(target_arch = "wasm32"))]
-        (Label::Quit, -1) => Some(Label::Credits),
-        (Label::Volume, 1) => {
+        (Label::Quit, -1, _) => Some(Label::Credits),
+        (Label::Volume, 1, _) => {
             if let Screen::Game = **screen {
                 Some(Label::Back)
             } else {
                 Some(Label::LogicalKeyboardLayout)
             }
         }
-        (Label::Volume, -1) => Some(Label::Back),
-        (Label::LogicalKeyboardLayout, 1) => Some(Label::PhysicalKeyboardLayout),
-        (Label::LogicalKeyboardLayout, -1) => Some(Label::Volume),
-        (Label::PhysicalKeyboardLayout, 1) => Some(Label::MaxDifficulty),
-        (Label::PhysicalKeyboardLayout, -1) => Some(Label::LogicalKeyboardLayout),
-        (Label::MaxDifficulty, 1) => Some(Label::Back),
-        (Label::MaxDifficulty, -1) => Some(Label::PhysicalKeyboardLayout),
-        (Label::ProgrammingLanguage, 1) => Some(Label::GameEngine),
-        (Label::ProgrammingLanguage, -1) => Some(Label::Back),
-        (Label::GameEngine, 1) => Some(Label::Palette),
-        (Label::GameEngine, -1) => Some(Label::ProgrammingLanguage),
-        (Label::Palette, 1) => Some(Label::LaunchProjectileSound),
-        (Label::Palette, -1) => Some(Label::GameEngine),
-        (Label::LaunchProjectileSound, 1) => Some(Label::ExplosionSound),
-        (Label::LaunchProjectileSound, -1) => Some(Label::Palette),
-        (Label::ExplosionSound, 1) => Some(Label::MistypeSound),
-        (Label::ExplosionSound, -1) => Some(Label::LaunchProjectileSound),
-        (Label::MistypeSound, 1) => Some(Label::Source),
-        (Label::MistypeSound, -1) => Some(Label::ExplosionSound),
-        (Label::Source, 1) => Some(Label::Back),
-        (Label::Source, -1) => Some(Label::MistypeSound),
-        (Label::Resume, 1) => Some(Label::GameSettings),
-        (Label::Resume, -1) => Some(Label::Back),
-        (Label::GameSettings, 1) => Some(Label::Back),
-        (Label::GameSettings, -1) => Some(Label::Resume),
-        (Label::PlayAgain, 1) => Some(Label::Back),
-        (Label::PlayAgain, -1) => Some(Label::Back),
-        (Label::Back, 1) => match (**screen, **game_screen) {
+        (Label::Volume, -1, _) => Some(Label::Back),
+        (Label::LogicalKeyboardLayout, 1, _) => Some(Label::PhysicalKeyboardLayout),
+        (Label::LogicalKeyboardLayout, -1, _) => Some(Label::Volume),
+        (Label::PhysicalKeyboardLayout, 1, _) => Some(Label::MaxDifficulty),
+        (Label::PhysicalKeyboardLayout, -1, _) => Some(Label::LogicalKeyboardLayout),
+        (Label::MaxDifficulty, 1, _) => Some(Label::Back),
+        (Label::MaxDifficulty, -1, _) => Some(Label::PhysicalKeyboardLayout),
+        (Label::ProgrammingLanguage, 1, _) => Some(Label::GameEngine),
+        (Label::ProgrammingLanguage, -1, _) => Some(Label::Back),
+        (Label::GameEngine, 1, _) => Some(Label::FontForge),
+        (Label::GameEngine, -1, _) => Some(Label::ProgrammingLanguage),
+        (Label::FontForge, 1, _) => Some(Label::FFmpeg),
+        (Label::FontForge, -1, _) => Some(Label::GameEngine),
+        (Label::FFmpeg, 1, _) => Some(Label::Source),
+        (Label::FFmpeg, -1, _) => Some(Label::FontForge),
+        (Label::SpaceMono, 1, _) => Some(Label::Palette),
+        (Label::SpaceMono, -1, _) => Some(Label::Back),
+        (Label::Palette, 1, _) => Some(Label::LaunchProjectileSound),
+        (Label::Palette, -1, _) => Some(Label::SpaceMono),
+        (Label::LaunchProjectileSound, 1, _) => Some(Label::ExplosionSound),
+        (Label::LaunchProjectileSound, -1, _) => Some(Label::Palette),
+        (Label::ExplosionSound, 1, _) => Some(Label::MistypeSound),
+        (Label::ExplosionSound, -1, _) => Some(Label::LaunchProjectileSound),
+        (Label::MistypeSound, 1, _) => Some(Label::Source),
+        (Label::MistypeSound, -1, _) => Some(Label::ExplosionSound),
+        (Label::Source, 1, _) => Some(Label::Back),
+        (Label::Source, -1, _) => Some(Label::MistypeSound),
+        (Label::Resume, 1, _) => Some(Label::GameSettings),
+        (Label::Resume, -1, _) => Some(Label::Back),
+        (Label::GameSettings, 1, _) => Some(Label::Back),
+        (Label::GameSettings, -1, _) => Some(Label::Resume),
+        (Label::PlayAgain, 1, _) => Some(Label::Back),
+        (Label::PlayAgain, -1, _) => Some(Label::Back),
+        (Label::Back, 1, _) => match (**screen, **game_screen) {
             (Screen::Settings, _) => Some(Label::Volume),
             (Screen::Credits, _) => Some(Label::ProgrammingLanguage),
             (Screen::Game, GameScreen::Settings) => Some(Label::Volume),
@@ -883,7 +1012,7 @@ pub fn keypress_navigate(
             (Screen::Game, GameScreen::End) => Some(Label::PlayAgain),
             _ => None,
         },
-        (Label::Back, -1) => match (**screen, **game_screen) {
+        (Label::Back, -1, _) => match (**screen, **game_screen) {
             (Screen::Settings, _) => Some(Label::MaxDifficulty),
             (Screen::Credits, _) => Some(Label::Source),
             (Screen::Game, GameScreen::Settings) => Some(Label::Volume),

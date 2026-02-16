@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use crate::*;
-use bevy::prelude::*;
+use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 use rand::{self, Rng, rngs::ThreadRng};
 
 pub fn on_toggle_pause(
@@ -111,7 +111,6 @@ pub fn on_msg(
                     Mesh2d(meshes.add(Circle::new(OBSTACLE_RADIUS))),
                     MeshMaterial2d(materials.add(colors::OBSTACLE)),
                     Transform::from_translation(pos.extend(OBSTACLE_Z_INDEX)),
-                    FONT.clone(),
                 ));
             }
             GameMsg::Invisible(entity) => {
@@ -161,7 +160,7 @@ fn spawn_explosion(
         let color = Color::srgba(
             1.,
             rng.random_range(0.5..1.),
-            rng.random_range(0.0..5.),
+            rng.random_range(0.0..1.),
             EXPLOSION_PARTICLE_INITIAL_ALPHA,
         );
 
@@ -197,18 +196,20 @@ fn text_color(i: usize, next: usize) -> TextColor {
 
 fn add_text(cmd: &mut EntityCommands, keys: &[char], to_show: usize, cleared: usize, next: usize) {
     cmd.with_children(|c| {
+        let font = foe_font();
         let mut iter = keys.iter().enumerate().skip(cleared).take(to_show);
         if let Some((i, &ch)) = iter.next() {
             c.spawn((
                 Text2d::new(ch),
                 TextLayout::default(),
-                FONT.clone(),
+                font.clone(),
                 text_color(i, next),
                 EnemyText,
+                NoFrustumCulling,
             ))
             .with_children(|c| {
                 for (i, &ch) in iter {
-                    c.spawn((TextSpan::new(ch), text_color(i, next), FONT.clone()));
+                    c.spawn((TextSpan::new(ch), text_color(i, next), font.clone()));
                 }
             });
         }
@@ -246,7 +247,7 @@ fn spawn_foe(
         if ONE_KEY {
             config.keypool()[0]
         } else {
-            config.keypool()[rng.random_range(0..QWERTY_POOL.len())]
+            config.keypool()[rng.random_range(0..LEN_KEY_POOL)]
         }
     });
 

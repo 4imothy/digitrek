@@ -30,7 +30,7 @@ jobs:
 
       - name: build
         run: |
-          ./build_wasm
+          ./scripts/build_wasm
 
       - name: setup pages
         uses: actions/configure-pages@v5
