@@ -26,7 +26,7 @@ pub enum Label {
     LaunchProjectileSound,
     ExplosionSound,
     MistypeSound,
-    SpaceMono,
+    SpaceGrotesk,
     FontForge,
     FFmpeg,
     Source,
@@ -56,7 +56,7 @@ impl Label {
             Label::LaunchProjectileSound => credits::LAUNCH_PROJECTILE_SOUND_LINK,
             Label::ExplosionSound => credits::EXPLOSION_SOUND_LINK,
             Label::MistypeSound => credits::MISTYPE_SOUND_LINK,
-            Label::SpaceMono => credits::SPACE_GROTESK_LINK,
+            Label::SpaceGrotesk => credits::SPACE_GROTESK_LINK,
             Label::FontForge => credits::FONTFORGE_LINK,
             Label::FFmpeg => credits::FFMPEG_LINK,
             Label::Source => credits::SOURCE_LINK,
@@ -132,13 +132,12 @@ pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
             cmd.spawn((Node {
                 justify_content: JustifyContent::SpaceBetween,
                 align_items: AlignItems::Center,
-                margin: UiRect::bottom(Val::Vh(-6.)),
                 ..default()
             },))
                 .with_children(|title| {
                     let name = env!("CARGO_PKG_NAME");
                     let len = name.chars().count();
-                    let angle_span = PI / 2.;
+                    let angle_span = PI / 4.;
                     let angle_start = -angle_span / 2.;
                     for (i, c) in name.chars().enumerate() {
                         let t = i as f32 / (len - 1) as f32;
@@ -147,13 +146,13 @@ pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
                             Text::new(c),
                             title_font.clone(),
                             UiTransform {
-                                translation: Val2::new(Val::ZERO, Val::Vh(-10. * (t * PI).sin())),
+                                translation: Val2::new(Val::ZERO, Val::Vh(-5. * (t * PI).sin())),
                                 rotation: Rot2::radians(angle),
                                 ..default()
                             },
                             TextColor(colors::TITLE_CHARS[i]),
                             Node {
-                                padding: UiRect::horizontal(Val::Vh(1.)),
+                                padding: UiRect::horizontal(Val::Vh(0.5)),
                                 ..default()
                             },
                         ));
@@ -337,7 +336,7 @@ fn do_action(
         | Label::LaunchProjectileSound
         | Label::ExplosionSound
         | Label::MistypeSound
-        | Label::SpaceMono
+        | Label::SpaceGrotesk
         | Label::FontForge
         | Label::FFmpeg
         | Label::Source => {
@@ -441,7 +440,7 @@ pub fn help_setup(mut commands: Commands, config: Res<Config>) {
                 Text::new(format!(
                     "avoid polygons and circles\n\
                      use {up}{left}{down}{right} to move\n\
-                     use the right side of the keyboard to defeat polygons\n\
+                     use the rest of the keyboard to defeat polygons\n\
                      press space or backspace to stop targeting a polygon",
                     up = config.up_char(),
                     left = config.left_char(),
@@ -725,7 +724,7 @@ pub fn credits_setup(mut commands: Commands) {
                         ));
                         spawn_button(
                             col,
-                            Label::SpaceMono,
+                            Label::SpaceGrotesk,
                             credits::SPACE_GROTESK_TEXT,
                             false,
                             font.clone(),
@@ -932,8 +931,8 @@ pub fn keypress_navigate(
     };
 
     let next_selection = match (selected_label, v_dir, h_dir) {
-        (Label::ProgrammingLanguage, 0, 1) => Some(Label::SpaceMono),
-        (Label::SpaceMono, 0, -1) => Some(Label::ProgrammingLanguage),
+        (Label::ProgrammingLanguage, 0, 1) => Some(Label::SpaceGrotesk),
+        (Label::SpaceGrotesk, 0, -1) => Some(Label::ProgrammingLanguage),
         (Label::GameEngine, 0, 1) => Some(Label::Palette),
         (Label::Palette, 0, -1) => Some(Label::GameEngine),
         (Label::FontForge, 0, 1) => Some(Label::LaunchProjectileSound),
@@ -986,10 +985,10 @@ pub fn keypress_navigate(
         (Label::FontForge, -1, _) => Some(Label::GameEngine),
         (Label::FFmpeg, 1, _) => Some(Label::Source),
         (Label::FFmpeg, -1, _) => Some(Label::FontForge),
-        (Label::SpaceMono, 1, _) => Some(Label::Palette),
-        (Label::SpaceMono, -1, _) => Some(Label::Back),
+        (Label::SpaceGrotesk, 1, _) => Some(Label::Palette),
+        (Label::SpaceGrotesk, -1, _) => Some(Label::Back),
         (Label::Palette, 1, _) => Some(Label::LaunchProjectileSound),
-        (Label::Palette, -1, _) => Some(Label::SpaceMono),
+        (Label::Palette, -1, _) => Some(Label::SpaceGrotesk),
         (Label::LaunchProjectileSound, 1, _) => Some(Label::ExplosionSound),
         (Label::LaunchProjectileSound, -1, _) => Some(Label::Palette),
         (Label::ExplosionSound, 1, _) => Some(Label::MistypeSound),

@@ -11,13 +11,13 @@ use bevy::{asset::RenderAssetUsages, input::common_conditions::input_just_presse
 use bevy_pkv::PkvStore;
 use rand::distr::weighted::WeightedIndex;
 use serde::{Deserialize, Serialize};
-use std::{f32::consts::PI, sync::LazyLock};
+use std::{collections::HashMap, f32::consts::PI, sync::LazyLock};
 
 const SHOW_LOCAL_POINTS: bool = cfg!(feature = "show_local_points");
 const INVINCIBLE: bool = cfg!(feature = "invincible");
 const ONE_KEY: bool = cfg!(feature = "one_key");
 const MIN_DELAY: bool = cfg!(feature = "min_delay");
-const TIME_MULTIPLIER: f32 = 1.;
+const TIME_MULTIPLIER: f32 = if cfg!(feature = "speedup") { 5. } else { 1. };
 
 const PLAYER_RADIUS: f32 = 50.;
 const FOE_SIZE: f32 = PLAYER_RADIUS * 1.4;
@@ -32,6 +32,8 @@ const PLAYER_LAUNCHER_LENGTH: f32 = PLAYER_RADIUS / 1.5;
 const PLAYER_LAUNCHER_WIDTH: f32 = PROJECTILE_RADIUS * 2.;
 const HEXAGON_LAUNCHER_LENGTH: f32 = FOE_SIZE * 1.5;
 const HEXAGON_LAUNCHER_WIDTH: f32 = OBSTACLE_RADIUS * 2.;
+const PENTAGON_LAUNCHER_LENGTH: f32 = FOE_SIZE * 1.2;
+const PENTAGON_LAUNCHER_WIDTH: f32 = FOE_SIZE;
 
 const PLAYER_MOVEMENT_SPEED: f32 = 400.;
 const PLAYER_ROTATION_SPEED: f32 = 4.;
@@ -49,14 +51,15 @@ const SHAPE_ROT_SPEEDS: [f32; NUM_SHAPES] = [
 ];
 const PROJECTILE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED * 4.;
 const OBSTACLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 3.;
-const BOUNCE_DECAY: f32 = 5.;
-const BOUNCE_DURATION: f32 = 0.5;
-const BOUNCE_MULTIPLIER: f32 = 1.5;
+const KNOCKBACK_DECAY: f32 = 5.;
+const KNOCKBACK_MULTIPLIER: f32 = 1.5;
+const KNOCKBACK_STOP_SPEED: f32 = 15.;
 
 const FIRST_FOE_SPAWN_DELAY: f32 = 0.;
 const SPAWN_DELTA: f32 = 0.3;
 const SPAWN_LOCATION_MULTIPLIER: f32 = 1.2;
 const NUM_SHAPES: usize = 4;
+const FOE_MAX_SIDES: usize = 6;
 const SHAPES: [Shape; NUM_SHAPES] = [
     Shape::Triangle,
     Shape::Rhombus,
@@ -73,7 +76,7 @@ const FOE_FORCE_SUMMONS: [f32; NUM_SHAPES] = [
 ];
 
 const SHAPE_NUM_KEYS: [usize; NUM_SHAPES] = [1, 2, 3, 4];
-const FOE_MAX_NUM_KEYS: usize = SHAPE_NUM_KEYS[3];
+const FOE_MAX_NUM_KEYS: usize = *SHAPE_NUM_KEYS.last().unwrap();
 const HEXAGON_LAUNCH_DELAY: f32 = 4.;
 const HEXAGON_VIEWPORT_PADDING: f32 = FOE_SIZE * 3.;
 const PENTAGON_SUMMON_WEIGHTS: [f32; 1] = [1.0];
@@ -82,6 +85,12 @@ const PROJECTILE_INC_TIME: f32 = 0.1;
 const SUMMONER_COLLISION_PADDING: f32 = PLAYER_RADIUS / 2.;
 const SUMMONER_ORBIT_RADIUS: f32 = PLAYER_RADIUS * 7.;
 const COS_MIN_LEADING_VERTEX_ALIGNMENT: f32 = 0.3;
+const COUNTDOWN_START_SCALE: f32 = 1.5;
+const COUNTDOWN_THICKNESS: f32 = INDICATOR_THICKNESS / 2.;
+const COUNTDOWN_Z_OFFSET: f32 = -0.5;
+const LAUNCH_RECOIL_SPEED: f32 = FOE_SIZE * 1.5;
+const LAUNCHER_ARM_RECOIL_DURATION: f32 = 0.25;
+const LAUNCHER_ARM_RECOIL_MIN_SCALE: f32 = 0.3;
 
 const TRIANGLE_CENTERING_OFFSET_Y: f32 = FOE_SIZE / 3.;
 const TRIANGLE_LOCAL_POINTS: [Vec3; 3] = [
@@ -204,6 +213,10 @@ mod colors {
     pub const VOLUME_BAR: Color = FOREGROUND;
     pub const TITLE_CHARS: [Color; env!("CARGO_PKG_NAME").len()] =
         [GREEN, PINK, ORANGE, PINK, YELLOW, PURPLE, CYAN, RED];
+    pub const OUTLINE_MESH: Color = match COMMENT {
+        Color::Srgba(x) => Color::Srgba(Srgba { alpha: 0.7, ..x }),
+        _ => unreachable!(),
+    };
 }
 
 const PRESS_REPEAT_DELAY: f32 = 0.4;
@@ -460,17 +473,18 @@ fn in_menu(state: Res<State<Screen>>, game_state: Res<State<GameScreen>>) -> boo
 fn game_plugin(app: &mut App) {
     let exit = (
         game::default_state,
-        game::despawn::<Player>,
-        game::despawn::<Foe>,
-        game::despawn::<Obstacle>,
-        game::despawn::<ExplosionParticle>,
-        game::despawn::<Projectile>,
-        game::despawn::<Indicator>,
-        game::despawn::<Slowdown>,
-        game::despawn::<Stats>,
+        despawn::<Player>,
+        despawn::<Foe>,
+        despawn::<Obstacle>,
+        despawn::<ExplosionParticle>,
+        despawn::<Projectile>,
+        despawn::<Indicator>,
+        despawn::<Slowdown>,
+        despawn::<Stats>,
     );
     app.add_systems(OnEnter(Screen::Game), game::setup)
         .add_systems(OnExit(Screen::Game), exit)
+        .insert_resource(FoePointsCache(HashMap::new()))
         .insert_resource(Time::<Fixed>::from_hz(60.))
         .init_state::<GameScreen>()
         .add_message::<GameMsg>()
@@ -498,10 +512,14 @@ fn game_plugin(app: &mut App) {
         .add_systems(
             FixedUpdate,
             (
-                game::enemy_collisions,
-                game::update_spawned_relations,
-                game::player_collisions,
-                game::obstacle_collisions,
+                game::foe_points,
+                (
+                    game::enemy_collisions,
+                    game::update_spawned_relations,
+                    game::player_collisions,
+                    game::obstacle_collisions,
+                )
+                    .after(game::foe_points),
                 game::spawner,
                 game::track_selected_enemy,
                 game::update_clock,
@@ -519,10 +537,11 @@ fn game_plugin(app: &mut App) {
                 game::summoner_foe,
                 game::launcher_foe,
                 game::foe_launcher,
-                game::track_player_for_hexagon,
+                game::track_player_for_foe_launcher,
                 game::summoner,
                 game::obstacle,
                 game::explosion_system,
+                game::update_countdown_indicators,
             )
                 .run_if(in_state(Screen::Game)),
         )
@@ -549,16 +568,12 @@ fn game_plugin(app: &mut App) {
         .add_systems(PostUpdate, msg::on_toggle_pause);
 }
 
-#[macro_export]
-macro_rules! points {
-    ($shape:expr, $transform:expr) => {{
-        match $shape {
-            Shape::Triangle => &TRIANGLE_LOCAL_POINTS.map(|p| $transform.transform_point(p)),
-            Shape::Rhombus => &RHOMBUS_LOCAL_POINTS.map(|p| $transform.transform_point(p)),
-            Shape::Pentagon => &PENTAGON_LOCAL_POINTS.map(|p| $transform.transform_point(p)),
-            Shape::Hexagon => &HEXAGON_LOCAL_POINTS.map(|p| $transform.transform_point(p)),
-        }
-    }};
+#[derive(Resource)]
+struct FoePointsCache(HashMap<Entity, FoePoints>);
+
+struct FoePoints {
+    data: [Vec3; FOE_MAX_SIDES],
+    len: usize,
 }
 
 #[derive(Component)]
@@ -667,7 +682,12 @@ struct Launcher {
 }
 
 #[derive(Component)]
-struct FoeLauncher;
+struct FoeLauncher {
+    recoil: f32,
+}
+
+#[derive(Component)]
+struct CountdownIndicator;
 
 #[derive(Component)]
 struct EnemyText;
@@ -702,6 +722,12 @@ struct AudioAssets {
     pub projectile_launch: Handle<AudioSource>,
     pub unmatched_keypress: Handle<AudioSource>,
     pub explosion: Handle<AudioSource>,
+}
+
+#[derive(Resource)]
+struct ShapeAssets {
+    meshes: [Handle<Mesh>; NUM_SHAPES],
+    materials: [Handle<ColorMaterial>; NUM_SHAPES],
 }
 
 pub fn text_font() -> TextFont {
@@ -745,8 +771,7 @@ struct Foe {
     skipped: usize,
     next_index: usize,
     orig_len: usize,
-    bounce_velocity: Option<Vec2>,
-    bounce_timer: f32,
+    knockback: Option<Vec2>,
     colliding: bool,
     spawned_by: Option<Entity>,
     entered_viewport: bool,
@@ -766,8 +791,7 @@ impl Foe {
             cleared: 0,
             skipped: 0,
             orig_len,
-            bounce_velocity: None,
-            bounce_timer: 0.,
+            knockback: None,
             colliding: false,
             spawned_by,
             entered_viewport: false,
@@ -892,4 +916,10 @@ struct Clock(f32);
 
 fn toggle_pause(mut msg: MessageWriter<PauseMsg>) {
     msg.write(PauseMsg::TogglePause);
+}
+
+fn despawn<T: Component>(mut commands: Commands, q: Query<Entity, With<T>>) {
+    for e in q {
+        commands.entity(e).despawn();
+    }
 }

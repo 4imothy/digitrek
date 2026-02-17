@@ -2,7 +2,7 @@
 
 use crate::*;
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
-use rand::{self, Rng, rngs::ThreadRng};
+use std::f32::consts::{FRAC_PI_2, TAU};
 
 pub fn on_toggle_pause(
     mut msg: MessageReader<PauseMsg>,
@@ -42,19 +42,13 @@ pub fn on_msg(
     stats: Single<&mut Stats>,
     mut pkv: ResMut<PkvStore>,
     window: Single<&Window>,
+    shape_assets: Res<ShapeAssets>,
 ) {
-    let mut rng = rand::rng();
     let viewport_width = window.width() * VIEWPORT_HEIGHT / window.height();
     for msg in msg.read() {
         match msg {
             GameMsg::Explosion(position) => {
-                spawn_explosion(
-                    &mut rng,
-                    &mut commands,
-                    &mut meshes,
-                    &mut materials,
-                    position,
-                );
+                spawn_explosion(&mut commands, &mut meshes, &mut materials, position);
             }
             GameMsg::Despawn(entity) => {
                 commands.entity(*entity).insert(ToDespawn);
@@ -72,7 +66,14 @@ pub fn on_msg(
                 commands.entity(*entity).despawn_related::<Children>();
             }
             GameMsg::ReplaceShape(entity, shape) => {
-                replace_shape(&mut commands, &mut meshes, &mut materials, *entity, shape);
+                replace_shape(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    *entity,
+                    shape,
+                    &shape_assets,
+                );
             }
             GameMsg::AddText(entity) => {
                 let mut cmd = commands.entity(*entity);
@@ -90,7 +91,6 @@ pub fn on_msg(
             }
             GameMsg::SpawnFoe(shape, pos, spawned_by, rot) => {
                 spawn_foe(
-                    &mut rng,
                     &mut commands,
                     &mut meshes,
                     &mut materials,
@@ -100,6 +100,7 @@ pub fn on_msg(
                     *spawned_by,
                     &config,
                     viewport_width,
+                    &shape_assets,
                 );
             }
             GameMsg::SpawnObstacle(pos, direction) => {
@@ -146,38 +147,37 @@ pub fn on_msg(
 }
 
 fn spawn_explosion(
-    rng: &mut ThreadRng,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<ColorMaterial>>,
     loc: &Vec2,
 ) {
-    for _ in 0..rng.random_range(15..30) {
-        let angle = rng.random_range(0.0..std::f32::consts::TAU);
-        let speed = rng.random_range(50.0..150.);
+    for _ in 0..rand::random_range(15..30) {
+        let angle = rand::random_range(0.0..std::f32::consts::TAU);
+        let speed = rand::random_range(50.0..150.);
         let velocity = Vec2::new(angle.cos(), angle.sin()) * speed;
 
         let color = Color::srgba(
             1.,
-            rng.random_range(0.5..1.),
-            rng.random_range(0.0..1.),
+            rand::random_range(0.5..1.),
+            rand::random_range(0.0..1.),
             EXPLOSION_PARTICLE_INITIAL_ALPHA,
         );
 
         let material = materials.add(color);
 
         commands.spawn((
-            Mesh2d(meshes.add(Circle::new(rng.random_range(
+            Mesh2d(meshes.add(Circle::new(rand::random_range(
                 EXPLOSION_PARTICLE_RADIUS_LOWER..EXPLOSION_PARTICLE_RADIUS_UPPER,
             )))),
             MeshMaterial2d(material.clone()),
-            Transform::from_translation(loc.extend(rng.random_range(
+            Transform::from_translation(loc.extend(rand::random_range(
                 EXPLOSION_Z_INDEX - EXPLOSION_Z_INDEX_RANGE
                     ..EXPLOSION_Z_INDEX + EXPLOSION_Z_INDEX_RANGE,
             ))),
             ExplosionParticle {
                 velocity,
-                lifetime: rng.random_range(0.5..EXPLOSION_PARTICLE_MAX_LIFETIME),
+                lifetime: rand::random_range(0.5..EXPLOSION_PARTICLE_MAX_LIFETIME),
                 material,
             },
         ));
@@ -216,8 +216,78 @@ fn add_text(cmd: &mut EntityCommands, keys: &[char], to_show: usize, cleared: us
     });
 }
 
+fn add_foe_launcher(
+    ent_cmds: &mut EntityCommands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<ColorMaterial>>,
+    arm_length: f32,
+    arm_width: f32,
+    countdown_sides: usize,
+) {
+    let mut arm_mesh = Mesh::new(
+        bevy::render::render_resource::PrimitiveTopology::TriangleStrip,
+        RenderAssetUsages::default(),
+    );
+    arm_mesh.insert_attribute(
+        Mesh::ATTRIBUTE_POSITION,
+        vec![
+            [0., -arm_width / 2., 0.],
+            [0., arm_width / 2., 0.],
+            [arm_length, -arm_width / 2., 0.],
+            [arm_length, arm_width / 2., 0.],
+        ],
+    );
+    arm_mesh.insert_indices(bevy::mesh::Indices::U32(vec![0, 1, 3, 0, 2, 3]));
+    ent_cmds.with_children(|cmd| {
+        cmd.spawn((
+            FoeLauncher { recoil: 0.0 },
+            Mesh2d(meshes.add(arm_mesh)),
+            MeshMaterial2d(materials.add(colors::LAUNCHER)),
+            Transform::from_xyz(0., 0., -1.),
+        ));
+    });
+    let cd_mesh = meshes.add(countdown_outline_mesh(
+        countdown_sides,
+        FOE_SIZE,
+        COUNTDOWN_THICKNESS,
+    ));
+    let cd_mat = materials.add(colors::OUTLINE_MESH);
+    ent_cmds.with_children(|cmd| {
+        cmd.spawn((
+            CountdownIndicator,
+            Mesh2d(cd_mesh),
+            MeshMaterial2d(cd_mat),
+            Transform::from_xyz(0., 0., COUNTDOWN_Z_OFFSET)
+                .with_scale(Vec3::splat(COUNTDOWN_START_SCALE)),
+        ));
+    });
+}
+
+fn countdown_outline_mesh(sides: usize, radius: f32, thickness: f32) -> Mesh {
+    let inner_radius = radius - thickness / 2.;
+    let outer_radius = radius + thickness / 2.;
+    let mut positions = Vec::with_capacity((sides + 1) * 2);
+    let mut indices = Vec::with_capacity((sides + 1) * 2);
+
+    for i in 0..=sides {
+        let theta = FRAC_PI_2 + i as f32 / sides as f32 * TAU;
+        let (sin, cos) = theta.sin_cos();
+        positions.push([outer_radius * cos, outer_radius * sin, 0.]);
+        positions.push([inner_radius * cos, inner_radius * sin, 0.]);
+        indices.push((i * 2) as u32);
+        indices.push((i * 2 + 1) as u32);
+    }
+
+    let mut mesh = Mesh::new(
+        bevy::render::render_resource::PrimitiveTopology::TriangleStrip,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_indices(bevy::mesh::Indices::U32(indices));
+    mesh
+}
+
 fn spawn_foe(
-    rng: &mut ThreadRng,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<ColorMaterial>>,
@@ -227,15 +297,10 @@ fn spawn_foe(
     spawned_by: Option<Entity>,
     config: &Config,
     viewport_width: f32,
+    shape_assets: &ShapeAssets,
 ) {
     let num_keys = SHAPE_NUM_KEYS[shape.id()];
-    let color = colors::SHAPE_COLORS[shape.id()];
-    let mesh = match shape {
-        Shape::Triangle => meshes.add(TRIANGLE),
-        Shape::Rhombus => meshes.add(RHOMBUS),
-        Shape::Pentagon => meshes.add(PENTAGON),
-        Shape::Hexagon => meshes.add(HEXAGON),
-    };
+    let mesh = shape_assets.meshes[shape.id()].clone();
 
     let z_index = match shape {
         Shape::Triangle | Shape::Rhombus => TRACKING_Z_INDEX,
@@ -247,7 +312,7 @@ fn spawn_foe(
         if ONE_KEY {
             config.keypool()[0]
         } else {
-            config.keypool()[rng.random_range(0..LEN_KEY_POOL)]
+            config.keypool()[rand::random_range(0..LEN_KEY_POOL)]
         }
     });
 
@@ -258,7 +323,7 @@ fn spawn_foe(
             rotation: rot.map(Quat::from_rotation_z).unwrap_or_default(),
             ..default()
         },
-        MeshMaterial2d(materials.add(color)),
+        MeshMaterial2d(shape_assets.materials[shape.id()].clone()),
     ));
     match shape {
         Shape::Triangle | Shape::Rhombus => {
@@ -271,6 +336,14 @@ fn spawn_foe(
                 leading_vertex: 0,
                 foe_dist: WeightedIndex::new(PENTAGON_SUMMON_WEIGHTS).unwrap(),
             });
+            add_foe_launcher(
+                &mut ent_cmds,
+                meshes,
+                materials,
+                PENTAGON_LAUNCHER_LENGTH,
+                PENTAGON_LAUNCHER_WIDTH,
+                5,
+            );
         }
         Shape::Hexagon => {
             let half_w = viewport_width / 2. - HEXAGON_VIEWPORT_PADDING;
@@ -282,27 +355,14 @@ fn spawn_foe(
                 target_pos,
                 stopped: false,
             });
-            let mut launcher_mesh = Mesh::new(
-                bevy::render::render_resource::PrimitiveTopology::TriangleStrip,
-                RenderAssetUsages::default(),
+            add_foe_launcher(
+                &mut ent_cmds,
+                meshes,
+                materials,
+                HEXAGON_LAUNCHER_LENGTH,
+                HEXAGON_LAUNCHER_WIDTH,
+                6,
             );
-            let vertices = [
-                [0., -HEXAGON_LAUNCHER_WIDTH / 2., 0.],
-                [0., HEXAGON_LAUNCHER_WIDTH / 2., 0.],
-                [HEXAGON_LAUNCHER_LENGTH, -HEXAGON_LAUNCHER_WIDTH / 2., 0.],
-                [HEXAGON_LAUNCHER_LENGTH, HEXAGON_LAUNCHER_WIDTH / 2., 0.],
-            ];
-            launcher_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices.to_vec());
-            launcher_mesh.insert_indices(bevy::mesh::Indices::U32(vec![0, 1, 3, 0, 2, 3]));
-
-            ent_cmds.with_children(|cmd| {
-                cmd.spawn((
-                    FoeLauncher,
-                    Mesh2d(meshes.add(launcher_mesh)),
-                    MeshMaterial2d(materials.add(colors::LAUNCHER)),
-                    Transform::from_xyz(0., 0., -1.),
-                ));
-            });
         }
     }
     add_text(&mut ent_cmds, &keys, num_keys, 0, 0);
@@ -310,7 +370,7 @@ fn spawn_foe(
     ent_cmds.insert(e);
 
     if SHOW_LOCAL_POINTS {
-        let points: &[Vec3] = points!(shape, Transform::IDENTITY);
+        let points = shape.local_points();
         let circle = Circle::new(10.);
         let circle_mesh = meshes.add(Mesh::from(circle));
         let circle_material = materials.add(Color::WHITE);
@@ -333,14 +393,10 @@ fn replace_shape(
     materials: &mut ResMut<Assets<ColorMaterial>>,
     entity: Entity,
     shape: &Shape,
+    shape_assets: &ShapeAssets,
 ) {
-    let color = materials.add(colors::SHAPE_COLORS[shape.id()]);
-    let mesh = match shape {
-        Shape::Triangle => meshes.add(TRIANGLE),
-        Shape::Rhombus => meshes.add(RHOMBUS),
-        Shape::Pentagon => meshes.add(PENTAGON),
-        Shape::Hexagon => unreachable!(),
-    };
+    let color = shape_assets.materials[shape.id()].clone();
+    let mesh = shape_assets.meshes[shape.id()].clone();
     let mut ent_cmds = commands.entity(entity);
     match shape {
         Shape::Rhombus => {
@@ -355,6 +411,14 @@ fn replace_shape(
                 leading_vertex: 0,
                 foe_dist: WeightedIndex::new(PENTAGON_SUMMON_WEIGHTS).unwrap(),
             });
+            add_foe_launcher(
+                &mut ent_cmds,
+                meshes,
+                materials,
+                PENTAGON_LAUNCHER_LENGTH,
+                PENTAGON_LAUNCHER_WIDTH,
+                5,
+            );
         }
         _ => {}
     }
