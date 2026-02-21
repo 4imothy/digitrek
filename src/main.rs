@@ -7,6 +7,7 @@ mod credits;
 mod game;
 mod menu;
 mod msg;
+
 use bevy::{asset::RenderAssetUsages, input::common_conditions::input_just_pressed, prelude::*};
 use bevy_pkv::PkvStore;
 use rand::distr::weighted::WeightedIndex;
@@ -921,5 +922,21 @@ fn toggle_pause(mut msg: MessageWriter<PauseMsg>) {
 fn despawn<T: Component>(mut commands: Commands, q: Query<Entity, With<T>>) {
     for e in q {
         commands.entity(e).despawn();
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+mod web_audio {
+    use wasm_bindgen::prelude::*;
+
+    #[wasm_bindgen(inline_js = "
+let ctx;
+const O = window.AudioContext;
+window.AudioContext = function(...a) { ctx = new O(...a); return ctx; };
+window.AudioContext.prototype = O.prototype;
+export function resume_audio() { if (ctx) ctx.resume(); }
+")]
+    extern "C" {
+        pub fn resume_audio();
     }
 }

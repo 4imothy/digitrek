@@ -7,7 +7,6 @@ const PRECACHE_ASSETS = [
     './favicon.svg',
     './digitrek.js',
     './digitrek_bg.wasm',
-    './restart_audio_context.js',
 ];
 
 self.addEventListener('install', event => {

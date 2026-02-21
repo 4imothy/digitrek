@@ -165,7 +165,7 @@ pub fn menu_setup(mut commands: Commands, config: Res<Config>) {
                 TextColor(colors::LABEL),
             ));
 
-            spawn_button(cmd, Label::Play, "start", true, font.clone());
+            spawn_button(cmd, Label::Play, "play", true, font.clone());
             spawn_button(cmd, Label::Help, "help", false, font.clone());
             spawn_button(cmd, Label::Settings, "settings", false, font.clone());
             spawn_button(cmd, Label::Credits, "credits", false, font.clone());
@@ -281,6 +281,8 @@ fn do_action(
             app_exit_msg.write(AppExit::Success);
         }
         Label::Play => {
+            #[cfg(target_arch = "wasm32")]
+            web_audio::resume_audio();
             next_screen.set(Screen::Game);
         }
         Label::Settings => next_screen.set(Screen::Settings),

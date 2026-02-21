@@ -2159,6 +2159,7 @@ dependencies = [
  "open",
  "rand 0.10.0",
  "serde",
+ "wasm-bindgen",
  "web-sys",
 ]
 
