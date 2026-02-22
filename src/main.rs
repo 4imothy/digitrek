@@ -67,13 +67,14 @@ const SHAPES: [Shape; NUM_SHAPES] = [
     Shape::Pentagon,
     Shape::Hexagon,
 ];
-const SPAWNER_FOE_WEIGHTS: [f32; NUM_SHAPES] = [0.35, 0.30, 0.20, 0.15];
-const FOE_SPAWN_SINCE_FACTOR: f32 = 5.;
-const FOE_FORCE_SUMMONS: [f32; NUM_SHAPES] = [
-    FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[0],
-    FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[1],
-    FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[2],
-    FOE_SPAWN_SINCE_FACTOR / SPAWNER_FOE_WEIGHTS[3],
+const NUM_PHASE: usize = NUM_SHAPES + 1;
+const PHASE_TIME: f32 = 7.;
+const PHASE_WEIGHTS: [[f32; NUM_SHAPES]; NUM_PHASE] = [
+    [1.00, 0.00, 0.00, 0.00],
+    [0.30, 0.70, 0.00, 0.00],
+    [0.25, 0.25, 0.50, 0.00],
+    [0.20, 0.20, 0.25, 0.35],
+    [0.15, 0.20, 0.35, 0.30],
 ];
 
 const SHAPE_NUM_KEYS: [usize; NUM_SHAPES] = [1, 2, 3, 4];
@@ -153,6 +154,14 @@ fn spawner_foe_delay_mu(x: f32, max_dif: bool) -> f32 {
     }
 }
 
+fn foe_weights(clock: f32, max_difficulty: bool) -> [f32; NUM_SHAPES] {
+    if max_difficulty || MIN_DELAY {
+        return *PHASE_WEIGHTS.last().unwrap();
+    }
+    let phase: usize = ((clock / PHASE_TIME) as usize).min(PHASE_WEIGHTS.len() - 1);
+    PHASE_WEIGHTS[phase]
+}
+
 const EXPLOSION_Z_INDEX: f32 = 0.;
 const EXPLOSION_Z_INDEX_RANGE: f32 = 0.1;
 const OBSTACLE_Z_INDEX: f32 = 1.;
@@ -218,6 +227,7 @@ mod colors {
         Color::Srgba(x) => Color::Srgba(Srgba { alpha: 0.7, ..x }),
         _ => unreachable!(),
     };
+    pub const EXPLOSION: [Color; 2] = [ORANGE, RED];
 }
 
 const PRESS_REPEAT_DELAY: f32 = 0.4;
@@ -649,7 +659,6 @@ enum PauseMsg {
 #[derive(Resource)]
 struct Spawner {
     foe_dist: WeightedIndex<f32>,
-    foe_spawns_since: [usize; NUM_SHAPES],
     foe_delay: f32,
     foe_delay_mu: f32,
     last_side: usize,

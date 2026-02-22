@@ -716,7 +716,7 @@ pub fn credits_setup(mut commands: Commands) {
                     })
                     .with_children(|col| {
                         col.spawn((
-                            Text::new("assets"),
+                            Text::new("visuals"),
                             title_font.clone(),
                             TextColor(colors::LABEL),
                             Node {

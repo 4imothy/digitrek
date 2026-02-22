@@ -157,12 +157,9 @@ fn spawn_explosion(
         let speed = rand::random_range(50.0..150.);
         let velocity = Vec2::new(angle.cos(), angle.sin()) * speed;
 
-        let color = Color::srgba(
-            1.,
-            rand::random_range(0.5..1.),
-            rand::random_range(0.0..1.),
-            EXPLOSION_PARTICLE_INITIAL_ALPHA,
-        );
+        let color = colors::EXPLOSION[0]
+            .mix(&colors::EXPLOSION[1], rand::random_range(0.0..1.))
+            .with_alpha(EXPLOSION_PARTICLE_INITIAL_ALPHA);
 
         let material = materials.add(color);
 

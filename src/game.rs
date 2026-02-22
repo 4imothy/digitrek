@@ -147,18 +147,17 @@ pub fn setup(
         },
     ));
     commands.insert_resource(Spawner {
-        foe_dist: WeightedIndex::new(SPAWNER_FOE_WEIGHTS).unwrap(),
+        foe_dist: WeightedIndex::new(PHASE_WEIGHTS[0]).unwrap(),
         foe_delay: FIRST_FOE_SPAWN_DELAY,
-        foe_spawns_since: [0, 0, 0, 0],
         foe_delay_mu: 0.,
         last_side: 0,
     });
     commands.insert_resource(AudioAssets {
         projectile_launch: audio.add(AudioSource {
-            bytes: Arc::from(*include_bytes!("../assets/projectile_launch.ogg")),
+            bytes: Arc::from(*include_bytes!("../assets/launch.ogg")),
         }),
         unmatched_keypress: audio.add(AudioSource {
-            bytes: Arc::from(*include_bytes!("../assets/unmatched_keypress.ogg")),
+            bytes: Arc::from(*include_bytes!("../assets/mistype.ogg")),
         }),
         explosion: audio.add(AudioSource {
             bytes: Arc::from(*include_bytes!("../assets/explosion.ogg")),
@@ -1206,19 +1205,15 @@ pub fn spawner(
 
     if spawner.foe_delay <= 0. {
         let mut rng = rand::rng();
+        let weights = foe_weights(clock.0, config.max_difficulty);
+        spawner.foe_dist = WeightedIndex::new(weights).unwrap();
 
         let width = viewport_width(&window);
 
-        let shape = SHAPES
-            .iter()
-            .find(|s| spawner.foe_spawns_since[s.id()] >= FOE_FORCE_SUMMONS[s.id()] as usize)
-            .unwrap_or_else(|| &SHAPES[spawner.foe_dist.sample(&mut rng)]);
-        for (i, count) in spawner.foe_spawns_since.iter_mut().enumerate() {
-            *count = if i == shape.id() { 0 } else { *count + 1 };
-        }
+        let shape = SHAPES[spawner.foe_dist.sample(&mut rng)];
 
         msg.write(GameMsg::SpawnFoe(
-            *shape,
+            shape,
             spawn_location(width, &mut spawner),
             None,
             None,
