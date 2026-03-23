@@ -21,16 +21,19 @@ const MIN_DELAY: bool = cfg!(feature = "min_delay");
 const TIME_MULTIPLIER: f32 = if cfg!(feature = "speedup") { 5. } else { 1. };
 
 const PLAYER_RADIUS: f32 = 50.;
+const PLAYER_HALF_ANGLE: f32 = PI / 6.;
+const PLAYER_ENGINE_WIDTH: f32 = PLAYER_RADIUS / 2.;
 const FOE_SIZE: f32 = PLAYER_RADIUS * 1.4;
 const OBSTACLE_RADIUS: f32 = PLAYER_RADIUS / 3.;
 const PROJECTILE_RADIUS: f32 = PLAYER_RADIUS / 10.;
-const INDICATOR_THICKNESS: f32 = PLAYER_RADIUS / 10.;
+const INDICATOR_THICKNESS: f32 = PLAYER_RADIUS / 15.;
 const INDICATOR_RADIUS: f32 = 1.5 * PLAYER_RADIUS;
 const INDICATOR_LONG_RECTANGLE_LENGTH: f32 = INDICATOR_THICKNESS * 3.;
 const EXPLOSION_PARTICLE_RADIUS_LOWER: f32 = PLAYER_RADIUS / 10.;
 const EXPLOSION_PARTICLE_RADIUS_UPPER: f32 = PLAYER_RADIUS / 5.;
-const PLAYER_LAUNCHER_LENGTH: f32 = PLAYER_RADIUS / 1.5;
-const PLAYER_LAUNCHER_WIDTH: f32 = PROJECTILE_RADIUS * 2.;
+const PLAYER_AIM_RING_RADIUS: f32 = PLAYER_RADIUS * 1.2;
+const PLAYER_AIM_RING_THICKNESS: f32 = INDICATOR_THICKNESS / 1.5;
+const PLAYER_AIM_NOTCH_RADIUS: f32 = PLAYER_RADIUS * 0.15;
 const HEXAGON_LAUNCHER_LENGTH: f32 = FOE_SIZE * 1.5;
 const HEXAGON_LAUNCHER_WIDTH: f32 = OBSTACLE_RADIUS * 2.;
 const PENTAGON_LAUNCHER_LENGTH: f32 = FOE_SIZE * 1.2;
@@ -183,7 +186,6 @@ const TIME_BEFORE_RESUME: f32 = 3.;
 const HIGH_SCORE_KEY: &str = "high_score";
 const VOLUME_KEY: &str = "volume";
 const PHYSICAL_KEYBOARD_LAYOUT_KEY: &str = "physical_keyboard_layout_key";
-const LOGICAL_KEYBOARD_LAYOUT_KEY: &str = "logical_keyboard_layout_key";
 const MAX_DIFFICULTY_KEY: &str = "max_difficulty";
 
 mod colors {
@@ -199,13 +201,15 @@ mod colors {
     const CYAN: Color = Color::srgb_u8(139, 233, 253);
     const PURPLE: Color = Color::srgb_u8(189, 147, 249);
     const PINK: Color = Color::srgb_u8(255, 121, 198);
-    const ORANGE: Color = Color::srgb_u8(255, 184, 108);
+    pub const ORANGE: Color = Color::srgb_u8(255, 184, 108);
+    pub const TYPING_INDICATOR: Color = CYAN;
     const RED: Color = Color::srgb_u8(255, 85, 85);
 
     pub const BASE: Color = BACKGROUND;
     pub const SHAPE_COLORS: [Color; 4] = [RED, PINK, PURPLE, ORANGE];
     pub const INDICATOR: Color = YELLOW;
     pub const PROJECTILE: Color = FOREGROUND;
+    pub const GLOW: Color = CYAN;
     pub const OBSTACLE: Color = CYAN;
     pub const PLAYER: Color = FOREGROUND;
     pub const LAUNCHER: Color = SELECTION;
@@ -233,13 +237,12 @@ mod colors {
 const PRESS_REPEAT_DELAY: f32 = 0.4;
 const PRESS_REPEAT_INTERVAL: f32 = 0.1;
 
-const LEN_KEY_POOL: usize = 28;
-#[rustfmt::skip]
-const QWERTY_POOL: [char; LEN_KEY_POOL] = [
-    'q',/*w*/ 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[',
-   /*a*//*s*//*d*/ 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'',
-    'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/',
+const LEN_KEY_POOL: usize = 26;
+const KEY_POOL: [char; LEN_KEY_POOL] = [
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',
+    't', 'u', 'v', 'w', 'x', 'y', 'z',
 ];
+
 const QWERTY_MOVEMENT: [(KeyCode, char); 4] = [
     (KeyCode::KeyD, 'd'),
     (KeyCode::KeyA, 'a'),
@@ -247,12 +250,6 @@ const QWERTY_MOVEMENT: [(KeyCode, char); 4] = [
     (KeyCode::KeyS, 's'),
 ];
 
-#[rustfmt::skip]
-const DVORAK_POOL: [char; LEN_KEY_POOL] = [
-     '\'',/*,*/ '.', 'p', 'y', 'f', 'g', 'c', 'r', 'l', '/',
-     /*a*//*o*//*e*/ 'u', 'i', 'd', 'h', 't', 'n', 's', '-',
-      ';', 'q', 'j', 'k', 'x', 'b', 'm', 'w', 'v', 'z',
-];
 const DVORAK_MOVEMENT: [(KeyCode, char); 4] = [
     (KeyCode::KeyE, 'e'),
     (KeyCode::KeyA, 'a'),
@@ -260,12 +257,6 @@ const DVORAK_MOVEMENT: [(KeyCode, char); 4] = [
     (KeyCode::KeyO, 'o'),
 ];
 
-#[rustfmt::skip]
-const COLEMAK_POOL: [char; LEN_KEY_POOL] = [
-    'q',/*w*/ 'f', 'p', 'g', 'j', 'l', 'u', 'y', ';', '[',
-   /*a*//*r*//*s*/ 't', 'd', 'h', 'n', 'e', 'i', 'o', '\'',
-    'z', 'x', 'c', 'v', 'b', 'k', 'm', ',', '.', '/',
-];
 const COLEMAK_MOVEMENT: [(KeyCode, char); 4] = [
     (KeyCode::KeyS, 's'),
     (KeyCode::KeyA, 'a'),
@@ -278,7 +269,6 @@ struct Config {
     high_score: usize,
     volume: u8,
     physical_keyboard_layout: KeyboardLayouts,
-    logical_keyboard_layout: KeyboardLayouts,
     max_difficulty: bool,
 }
 
@@ -288,7 +278,6 @@ impl Config {
             high_score: 0,
             volume: 100,
             physical_keyboard_layout: KeyboardLayouts::Qwerty,
-            logical_keyboard_layout: KeyboardLayouts::Qwerty,
             max_difficulty: false,
         };
         load_or_set(pkv, HIGH_SCORE_KEY, &mut config.high_score);
@@ -297,11 +286,6 @@ impl Config {
             pkv,
             PHYSICAL_KEYBOARD_LAYOUT_KEY,
             &mut config.physical_keyboard_layout,
-        );
-        load_or_set(
-            pkv,
-            LOGICAL_KEYBOARD_LAYOUT_KEY,
-            &mut config.logical_keyboard_layout,
         );
         load_or_set(pkv, MAX_DIFFICULTY_KEY, &mut config.max_difficulty);
         config
@@ -338,14 +322,6 @@ impl Config {
     }
     pub fn down_char(&self) -> char {
         self.dir(3).1
-    }
-
-    pub fn keypool(&self) -> [char; LEN_KEY_POOL] {
-        match self.logical_keyboard_layout {
-            KeyboardLayouts::Qwerty => QWERTY_POOL,
-            KeyboardLayouts::Dvorak => DVORAK_POOL,
-            KeyboardLayouts::Colemak => COLEMAK_POOL,
-        }
     }
 }
 
@@ -493,7 +469,8 @@ fn game_plugin(app: &mut App) {
         despawn::<Slowdown>,
         despawn::<Stats>,
     );
-    app.add_systems(OnEnter(Screen::Game), game::setup)
+    app.insert_resource(Mode::default())
+        .add_systems(OnEnter(Screen::Game), game::setup)
         .add_systems(OnExit(Screen::Game), exit)
         .insert_resource(FoePointsCache(HashMap::new()))
         .insert_resource(Time::<Fixed>::from_hz(60.))
@@ -717,6 +694,9 @@ struct Indicator {
 struct PlayerLauncher;
 
 #[derive(Component)]
+struct EngineGlow;
+
+#[derive(Component)]
 struct Slowdown {
     time: f32,
 }
@@ -898,6 +878,13 @@ impl KeyState {
             self.should_repeat = false;
         }
     }
+}
+
+#[derive(Resource, Default, PartialEq, Eq, Clone, Copy)]
+pub enum Mode {
+    #[default]
+    Movement,
+    Typing,
 }
 
 #[derive(Component)]

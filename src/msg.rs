@@ -98,7 +98,6 @@ pub fn on_msg(
                     *pos,
                     *rot,
                     *spawned_by,
-                    &config,
                     viewport_width,
                     &shape_assets,
                 );
@@ -292,7 +291,6 @@ fn spawn_foe(
     pos: Vec2,
     rot: Option<f32>,
     spawned_by: Option<Entity>,
-    config: &Config,
     viewport_width: f32,
     shape_assets: &ShapeAssets,
 ) {
@@ -307,9 +305,9 @@ fn spawn_foe(
 
     let keys: [char; FOE_MAX_NUM_KEYS] = std::array::from_fn(|_| {
         if ONE_KEY {
-            config.keypool()[0]
+            KEY_POOL[0]
         } else {
-            config.keypool()[rand::random_range(0..LEN_KEY_POOL)]
+            KEY_POOL[rand::random_range(0..LEN_KEY_POOL)]
         }
     });
 

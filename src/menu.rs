@@ -15,10 +15,6 @@ pub enum Label {
     PhysicalQwerty,
     PhysicalDvorak,
     PhysicalColemak,
-    LogicalKeyboardLayout,
-    LogicalQwerty,
-    LogicalDvorak,
-    LogicalColemak,
     MaxDifficulty,
     ProgrammingLanguage,
     GameEngine,
@@ -41,9 +37,9 @@ pub enum Label {
 impl Label {
     fn to_layout(self) -> Option<KeyboardLayouts> {
         match self {
-            Label::PhysicalQwerty | Label::LogicalQwerty => Some(KeyboardLayouts::Qwerty),
-            Label::PhysicalDvorak | Label::LogicalDvorak => Some(KeyboardLayouts::Dvorak),
-            Label::PhysicalColemak | Label::LogicalColemak => Some(KeyboardLayouts::Colemak),
+            Label::PhysicalQwerty => Some(KeyboardLayouts::Qwerty),
+            Label::PhysicalDvorak => Some(KeyboardLayouts::Dvorak),
+            Label::PhysicalColemak => Some(KeyboardLayouts::Colemak),
             _ => None,
         }
     }
@@ -66,27 +62,21 @@ impl Label {
 }
 
 impl KeyboardLayouts {
-    fn nav(&self, logical: bool, right: bool) -> Label {
-        match (self, logical, right) {
-            (KeyboardLayouts::Qwerty, false, false) => Label::PhysicalColemak,
-            (KeyboardLayouts::Qwerty, false, true) => Label::PhysicalDvorak,
-            (KeyboardLayouts::Qwerty, true, false) => Label::LogicalColemak,
-            (KeyboardLayouts::Qwerty, true, true) => Label::LogicalDvorak,
-            (KeyboardLayouts::Dvorak, false, false) => Label::PhysicalQwerty,
-            (KeyboardLayouts::Dvorak, false, true) => Label::PhysicalColemak,
-            (KeyboardLayouts::Dvorak, true, false) => Label::LogicalQwerty,
-            (KeyboardLayouts::Dvorak, true, true) => Label::LogicalColemak,
-            (KeyboardLayouts::Colemak, false, false) => Label::PhysicalDvorak,
-            (KeyboardLayouts::Colemak, false, true) => Label::PhysicalQwerty,
-            (KeyboardLayouts::Colemak, true, false) => Label::LogicalDvorak,
-            (KeyboardLayouts::Colemak, true, true) => Label::LogicalQwerty,
+    fn nav(&self, right: bool) -> Label {
+        match (self, right) {
+            (KeyboardLayouts::Qwerty, false) => Label::PhysicalColemak,
+            (KeyboardLayouts::Qwerty, true) => Label::PhysicalDvorak,
+            (KeyboardLayouts::Dvorak, false) => Label::PhysicalQwerty,
+            (KeyboardLayouts::Dvorak, true) => Label::PhysicalColemak,
+            (KeyboardLayouts::Colemak, false) => Label::PhysicalDvorak,
+            (KeyboardLayouts::Colemak, true) => Label::PhysicalQwerty,
         }
     }
-    fn right(&self, logical: bool) -> Label {
-        self.nav(logical, true)
+    fn right(&self) -> Label {
+        self.nav(true)
     }
-    fn left(&self, logical: bool) -> Label {
-        self.nav(logical, false)
+    fn left(&self) -> Label {
+        self.nav(false)
     }
 }
 
@@ -296,7 +286,6 @@ fn do_action(
                     PHYSICAL_KEYBOARD_LAYOUT_KEY,
                     &config.physical_keyboard_layout,
                 );
-                let _ = pkv.set(LOGICAL_KEYBOARD_LAYOUT_KEY, &config.logical_keyboard_layout);
                 let _ = pkv.set(MAX_DIFFICULTY_KEY, &config.max_difficulty);
             }
             (Screen::Credits | Screen::Help, _) => {
@@ -319,16 +308,6 @@ fn do_action(
                 keyboard_options,
                 action,
                 Label::PhysicalKeyboardLayout,
-                config,
-            )
-        }
-        Label::LogicalQwerty | Label::LogicalDvorak | Label::LogicalColemak => {
-            switch_keyboard_layout(
-                commands,
-                active,
-                keyboard_options,
-                action,
-                Label::LogicalKeyboardLayout,
                 config,
             )
         }
@@ -441,9 +420,10 @@ pub fn help_setup(mut commands: Commands, config: Res<Config>) {
             screen.spawn((
                 Text::new(format!(
                     "avoid polygons and circles\n\
-                     use {up}{left}{down}{right} to move\n\
-                     use the rest of the keyboard to defeat polygons\n\
-                     press space or backspace to stop targeting a polygon",
+                     press space to switch between movement and typing modes\n\
+                     use {up}{left}{down}{right} or the arrow keys to move\n\
+                     type the keys on a polygon to destroy it\n\
+                     press backspace to deselect a polygon",
                     up = config.up_char(),
                     left = config.left_char(),
                     down = config.down_char(),
@@ -485,92 +465,60 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                 TextColor(colors::LABEL),
             ));
 
-            let layout_groups = [
+            let buttons = [
                 (
-                    Label::LogicalKeyboardLayout,
-                    "logical:",
-                    [
-                        (
-                            Label::LogicalQwerty,
-                            "qwerty",
-                            matches!(config.logical_keyboard_layout, KeyboardLayouts::Qwerty),
-                        ),
-                        (
-                            Label::LogicalDvorak,
-                            "dvorak",
-                            matches!(config.logical_keyboard_layout, KeyboardLayouts::Dvorak),
-                        ),
-                        (
-                            Label::LogicalColemak,
-                            "colemak",
-                            matches!(config.logical_keyboard_layout, KeyboardLayouts::Colemak),
-                        ),
-                    ],
+                    Label::PhysicalQwerty,
+                    "qwerty",
+                    matches!(config.physical_keyboard_layout, KeyboardLayouts::Qwerty),
                 ),
                 (
-                    Label::PhysicalKeyboardLayout,
-                    "physical:",
-                    [
-                        (
-                            Label::PhysicalQwerty,
-                            "qwerty",
-                            matches!(config.physical_keyboard_layout, KeyboardLayouts::Qwerty),
-                        ),
-                        (
-                            Label::PhysicalDvorak,
-                            "dvorak",
-                            matches!(config.physical_keyboard_layout, KeyboardLayouts::Dvorak),
-                        ),
-                        (
-                            Label::PhysicalColemak,
-                            "colemak",
-                            matches!(config.physical_keyboard_layout, KeyboardLayouts::Colemak),
-                        ),
-                    ],
+                    Label::PhysicalDvorak,
+                    "dvorak",
+                    matches!(config.physical_keyboard_layout, KeyboardLayouts::Dvorak),
+                ),
+                (
+                    Label::PhysicalColemak,
+                    "colemak",
+                    matches!(config.physical_keyboard_layout, KeyboardLayouts::Colemak),
                 ),
             ];
-
-            for (group_label, group_text, buttons) in layout_groups {
-                let font = font.clone();
-                screen
-                    .spawn((
-                        group_label,
-                        Button,
-                        Node {
-                            flex_direction: FlexDirection::Row,
-                            ..button()
-                        },
-                        BorderColor::all(colors::UNSELECTED_OUTLINE),
-                    ))
-                    .with_children(|row| {
-                        row.spawn((
-                            Text::new(group_text),
-                            font.clone(),
-                            TextColor(colors::LABEL),
+            screen
+                .spawn((
+                    Label::PhysicalKeyboardLayout,
+                    Button,
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        ..button()
+                    },
+                    BorderColor::all(colors::UNSELECTED_OUTLINE),
+                ))
+                .with_children(|row| {
+                    row.spawn((
+                        Text::new("physical:"),
+                        font.clone(),
+                        TextColor(colors::LABEL),
+                    ));
+                    for (button_label, button_text, active) in buttons {
+                        let font = font.clone();
+                        let mut option = row.spawn((
+                            Button,
+                            button_label,
+                            Node { ..button() },
+                            BorderColor::all(colors::UNSELECTED_OUTLINE),
+                            KeyboardOption,
                         ));
-
-                        for (button_label, button_text, active) in buttons {
-                            let font = font.clone();
-                            let mut option = row.spawn((
-                                Button,
-                                button_label,
-                                Node { ..button() },
-                                BorderColor::all(colors::UNSELECTED_OUTLINE),
-                                KeyboardOption,
-                            ));
-                            if active {
-                                option.insert(Active);
-                            }
-                            option.with_children(|b| {
-                                b.spawn((
-                                    Text::new(button_text),
-                                    font,
-                                    TextColor(colors::BUTTON_TEXT),
-                                ));
-                            });
+                        if active {
+                            option.insert(Active);
                         }
-                    });
-            }
+                        option.with_children(|b| {
+                            b.spawn((
+                                Text::new(button_text),
+                                font,
+                                TextColor(colors::BUTTON_TEXT),
+                            ));
+                        });
+                    }
+                });
 
             screen
                 .spawn((
@@ -810,17 +758,12 @@ fn switch_keyboard_layout(
                 (Label::PhysicalKeyboardLayout, Label::PhysicalQwerty)
                     | (Label::PhysicalKeyboardLayout, Label::PhysicalDvorak)
                     | (Label::PhysicalKeyboardLayout, Label::PhysicalColemak)
-                    | (Label::LogicalKeyboardLayout, Label::LogicalQwerty)
-                    | (Label::LogicalKeyboardLayout, Label::LogicalDvorak)
-                    | (Label::LogicalKeyboardLayout, Label::LogicalColemak)
             )
         })
         .map(|(e, _)| e);
 
-    match parent_label {
-        Label::PhysicalKeyboardLayout => config.physical_keyboard_layout = to.to_layout().unwrap(),
-        Label::LogicalKeyboardLayout => config.logical_keyboard_layout = to.to_layout().unwrap(),
-        _ => {}
+    if parent_label == Label::PhysicalKeyboardLayout {
+        config.physical_keyboard_layout = to.to_layout().unwrap()
     }
 
     let to_ent = keyboard_options
@@ -873,17 +816,7 @@ pub fn keypress_navigate(
                     &mut commands,
                     &active,
                     &keyboard_options,
-                    config.physical_keyboard_layout.right(false),
-                    *selected_label,
-                    &mut config,
-                );
-            }
-            Label::LogicalKeyboardLayout => {
-                switch_keyboard_layout(
-                    &mut commands,
-                    &active,
-                    &keyboard_options,
-                    config.logical_keyboard_layout.right(true),
+                    config.physical_keyboard_layout.right(),
                     *selected_label,
                     &mut config,
                 );
@@ -899,17 +832,7 @@ pub fn keypress_navigate(
                     &mut commands,
                     &active,
                     &keyboard_options,
-                    config.physical_keyboard_layout.left(false),
-                    *selected_label,
-                    &mut config,
-                );
-            }
-            Label::LogicalKeyboardLayout => {
-                switch_keyboard_layout(
-                    &mut commands,
-                    &active,
-                    &keyboard_options,
-                    config.logical_keyboard_layout.left(true),
+                    config.physical_keyboard_layout.left(),
                     *selected_label,
                     &mut config,
                 );
@@ -969,14 +892,12 @@ pub fn keypress_navigate(
             if let Screen::Game = **screen {
                 Some(Label::Back)
             } else {
-                Some(Label::LogicalKeyboardLayout)
+                Some(Label::PhysicalKeyboardLayout)
             }
         }
         (Label::Volume, -1, _) => Some(Label::Back),
-        (Label::LogicalKeyboardLayout, 1, _) => Some(Label::PhysicalKeyboardLayout),
-        (Label::LogicalKeyboardLayout, -1, _) => Some(Label::Volume),
         (Label::PhysicalKeyboardLayout, 1, _) => Some(Label::MaxDifficulty),
-        (Label::PhysicalKeyboardLayout, -1, _) => Some(Label::LogicalKeyboardLayout),
+        (Label::PhysicalKeyboardLayout, -1, _) => Some(Label::Volume),
         (Label::MaxDifficulty, 1, _) => Some(Label::Back),
         (Label::MaxDifficulty, -1, _) => Some(Label::PhysicalKeyboardLayout),
         (Label::ProgrammingLanguage, 1, _) => Some(Label::GameEngine),
@@ -1017,7 +938,7 @@ pub fn keypress_navigate(
             (Screen::Settings, _) => Some(Label::MaxDifficulty),
             (Screen::Credits, _) => Some(Label::Source),
             (Screen::Game, GameScreen::Settings) => Some(Label::Volume),
-            (Screen::Game, GameScreen::Pause) => Some(Label::Resume),
+            (Screen::Game, GameScreen::Pause) => Some(Label::GameSettings),
             (Screen::Game, GameScreen::End) => Some(Label::PlayAgain),
             _ => None,
         },

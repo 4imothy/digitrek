@@ -9,7 +9,7 @@ use bevy::{
     prelude::*,
 };
 use rand::{self, distr::Distribution};
-use std::sync::Arc;
+use std::{f32::consts::FRAC_PI_2, sync::Arc};
 
 pub fn setup(
     mut commands: Commands,
@@ -17,26 +17,15 @@ pub fn setup(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut vtime: ResMut<Time<Virtual>>,
     mut audio: ResMut<Assets<AudioSource>>,
+    mut mode: ResMut<Mode>,
+    mut keyboard_input: ResMut<Messages<KeyboardInput>>,
 ) {
+    *mode = Mode::default();
+    keyboard_input.clear();
     vtime.set_relative_speed(TIME_MULTIPLIER);
-    let mut launcher_mesh = Mesh::new(
-        bevy::render::render_resource::PrimitiveTopology::TriangleStrip,
-        RenderAssetUsages::default(),
-    );
-    let vertices = [
-        [-PLAYER_LAUNCHER_WIDTH / 2., 0., 0.],
-        [PLAYER_LAUNCHER_WIDTH / 2., 0., 0.],
-        [-PLAYER_LAUNCHER_WIDTH / 2., PLAYER_LAUNCHER_LENGTH, 0.],
-        [PLAYER_LAUNCHER_WIDTH / 2., PLAYER_LAUNCHER_LENGTH, 0.],
-    ];
-    let indices = bevy::mesh::Indices::U32(vec![0, 1, 3, 0, 2, 3]);
-
-    launcher_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices.to_vec());
-    launcher_mesh.insert_indices(indices);
-
     commands
         .spawn((
-            Mesh2d(meshes.add(CircularSector::new(PLAYER_RADIUS, PI / 6.))),
+            Mesh2d(meshes.add(CircularSector::new(PLAYER_RADIUS, PLAYER_HALF_ANGLE))),
             MeshMaterial2d(materials.add(colors::PLAYER)),
             Transform {
                 translation: Vec3::new(0., PLAYER_RADIUS, PLAYER_Z_INDEX),
@@ -47,22 +36,47 @@ pub fn setup(
         ))
         .with_children(|cmds| {
             cmds.spawn((
-                Mesh2d(meshes.add(launcher_mesh)),
-                MeshMaterial2d(materials.add(colors::LAUNCHER)),
-                Transform {
-                    rotation: Quat::from_rotation_z(PI),
-                    translation: Vec3::new(0., PLAYER_RADIUS / 2., -1.),
-                    ..default()
-                },
+                Transform::from_xyz(0., PLAYER_RADIUS / 2., 0.),
+                Visibility::Inherited,
                 PlayerLauncher,
+            ))
+            .with_children(|c| {
+                c.spawn((
+                    Mesh2d(meshes.add(Circle::new(PLAYER_AIM_NOTCH_RADIUS))),
+                    MeshMaterial2d(materials.add(colors::LAUNCHER)),
+                    Transform::from_xyz(0., PLAYER_AIM_RING_RADIUS, 1.),
+                ));
+            });
+            cmds.spawn((
+                Mesh2d(meshes.add(Annulus::new(
+                    PLAYER_AIM_RING_RADIUS - PLAYER_AIM_RING_THICKNESS / 2.,
+                    PLAYER_AIM_RING_RADIUS + PLAYER_AIM_RING_THICKNESS / 2.,
+                ))),
+                MeshMaterial2d(materials.add(colors::LAUNCHER)),
+                Transform::from_xyz(0., PLAYER_RADIUS / 2., 0.5),
             ));
-        })
-        .with_children(|cmds| {
+            cmds.spawn((
+                Mesh2d(meshes.add(Rectangle::new(
+                    PLAYER_ENGINE_WIDTH,
+                    PLAYER_ENGINE_WIDTH / 2.,
+                ))),
+                MeshMaterial2d(materials.add(colors::LAUNCHER)),
+                Transform::from_xyz(0., PLAYER_RADIUS, -1.),
+            ));
+            cmds.spawn((
+                Mesh2d(meshes.add(CircularSector::new(
+                    0.8 * PLAYER_ENGINE_WIDTH / 2.,
+                    FRAC_PI_2,
+                ))),
+                MeshMaterial2d(materials.add(colors::GLOW)),
+                Transform::from_xyz(0., PLAYER_RADIUS + PLAYER_ENGINE_WIDTH / 4., 2.),
+                Visibility::Hidden,
+                EngineGlow,
+            ));
             if SHOW_LOCAL_POINTS {
                 let circle = Circle::new(10.);
                 let circle_mesh = meshes.add(Mesh::from(circle));
                 let circle_material = materials.add(Color::WHITE);
-
                 for p in PLAYER_LOCAL_TRIANGLE {
                     cmds.spawn((
                         Mesh2d(circle_mesh.clone()),
@@ -73,38 +87,13 @@ pub fn setup(
             }
         });
 
-    let segments = 32;
-    let inner_radius = INDICATOR_RADIUS - INDICATOR_THICKNESS / 2.;
-    let outer_radius = INDICATOR_RADIUS + INDICATOR_THICKNESS / 2.;
-
-    let mut positions = Vec::with_capacity(segments * 2);
-    let mut indices = Vec::with_capacity((segments + 1) * 2);
-
-    for i in 0..=segments {
-        let theta = i as f32 / segments as f32 * std::f32::consts::TAU;
-        let (sin, cos) = theta.sin_cos();
-
-        let outer = [outer_radius * cos, outer_radius * sin, 0.];
-        let inner = [inner_radius * cos, inner_radius * sin, 0.];
-
-        positions.push(outer);
-        positions.push(inner);
-
-        indices.push((i * 2) as u32);
-        indices.push((i * 2 + 1) as u32);
-    }
-
-    let mut indicator_mesh = Mesh::new(
-        bevy::render::render_resource::PrimitiveTopology::TriangleStrip,
-        RenderAssetUsages::default(),
-    );
-    indicator_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    indicator_mesh.insert_indices(bevy::mesh::Indices::U32(indices));
-
     commands
         .spawn((
             Indicator { active: false },
-            Mesh2d(meshes.add(indicator_mesh)),
+            Mesh2d(meshes.add(Annulus::new(
+                INDICATOR_RADIUS - INDICATOR_THICKNESS / 2.,
+                INDICATOR_RADIUS + INDICATOR_THICKNESS / 2.,
+            ))),
             MeshMaterial2d(materials.add(colors::INDICATOR)),
             Transform::from_xyz(0., 0., INDICATOR_Z_INDEX),
             Visibility::Hidden,
@@ -132,6 +121,7 @@ pub fn setup(
                 ));
             }
         });
+
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
@@ -320,9 +310,14 @@ impl FoePoints {
 pub fn keypress(
     mut msg: MessageWriter<GameMsg>,
     mut audio: MessageWriter<AudioMsg>,
-    mut evr_kbd: MessageReader<KeyboardInput>,
+    mut keyboard_input: MessageReader<KeyboardInput>,
     player: Single<(&mut Player, &Transform), Without<PlayerLauncher>>,
     launcher: Single<&mut Transform, (With<PlayerLauncher>, Without<Player>)>,
+    player_material: Single<
+        &MeshMaterial2d<ColorMaterial>,
+        (With<Player>, Without<PlayerLauncher>),
+    >,
+    mut color_materials: ResMut<Assets<ColorMaterial>>,
     indicator: Single<Entity, (With<Indicator>, Without<Player>)>,
     mut enemy_query: Query<
         (Entity, &mut Foe, &mut Transform),
@@ -330,35 +325,46 @@ pub fn keypress(
     >,
     time: ResMut<Time<Virtual>>,
     stats: Single<&mut Stats>,
-    config: Res<Config>,
+    mut mode: ResMut<Mode>,
 ) {
     let (mut player, player_transform) = player.into_inner();
     if !stats.running {
-        evr_kbd.clear();
+        keyboard_input.clear();
         return;
     }
     let mut found_selected = false;
     let mut launcher_transform = launcher.into_inner();
-    for ev in evr_kbd.read() {
-        if ev.state != ButtonState::Pressed {
+    let player_material = player_material.into_inner();
+    for key in keyboard_input.read() {
+        if key.state != ButtonState::Pressed {
             continue;
         }
         if time.is_paused() {
             continue;
         }
-        match &ev.logical_key {
-            Key::Backspace | Key::Space => {
+        match &key.logical_key {
+            Key::Space if !key.repeat => {
+                *mode = match *mode {
+                    Mode::Movement => Mode::Typing,
+                    Mode::Typing => Mode::Movement,
+                };
+                if let Some(mat) = color_materials.get_mut(player_material.id()) {
+                    mat.color = if *mode == Mode::Typing {
+                        colors::TYPING_INDICATOR
+                    } else {
+                        colors::PLAYER
+                    };
+                }
+            }
+            Key::Backspace if *mode == Mode::Typing => {
                 msg.write(GameMsg::Invisible(*indicator));
                 if let Some(selected) = player.selected {
                     msg.write(GameMsg::DeSelect(selected));
                 }
                 player.selected = None;
             }
-            Key::Character(str) => {
+            Key::Character(str) if *mode == Mode::Typing => {
                 if let Some(key) = str.chars().next().map(|c| c.to_ascii_lowercase()) {
-                    if !config.keypool().contains(&key) {
-                        continue;
-                    }
                     if let Some(selected) = player.selected
                         && let Ok((selected_entity, mut selected_enemy, _)) =
                             enemy_query.get_mut(selected)
@@ -447,7 +453,7 @@ pub fn keypress(
 
 fn projectile_spawn_location(player_trans: &Transform, launcher_trans: &Transform) -> Vec3 {
     player_trans
-        .transform_point(launcher_trans.transform_point(Vec3::new(0., PLAYER_LAUNCHER_LENGTH, 0.)))
+        .transform_point(launcher_trans.transform_point(Vec3::new(0., PLAYER_AIM_RING_RADIUS, 0.)))
         .with_z(EXPLOSION_Z_INDEX)
 }
 
@@ -461,8 +467,22 @@ pub fn player_movement(
     mut transform: Single<&mut Transform, With<Player>>,
     window: Single<&Window>,
     stats: Single<&Stats>,
+    mode: Res<Mode>,
+    mut glow: Single<&mut Visibility, With<EngineGlow>>,
 ) {
-    if stats.running {
+    let moving = stats.running
+        && !time.is_paused()
+        && *mode == Mode::Movement
+        && (key.v.is_some() || key.h.is_some());
+    let want = if moving {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+    if **glow != want {
+        **glow = want;
+    }
+    if stats.running && *mode == Mode::Movement {
         let rotation_factor = key.h.map(|v| if v { -1. } else { 1. }).unwrap_or(0.);
         let movement_factor = key.v.map(|v| if v { 1. } else { -1. }).unwrap_or(0.);
 
@@ -550,7 +570,13 @@ pub fn summoner_foe(
     let viewport_width = viewport_width(&window);
 
     for (mut foe, mut sum, mut transform) in &mut query {
-        if !foe.entered_viewport && in_viewport(transform.translation, viewport_width, Vec2::ZERO) {
+        if !foe.entered_viewport
+            && in_viewport(
+                transform.translation,
+                viewport_width,
+                Vec2::splat(-FOE_SIZE),
+            )
+        {
             foe.entered_viewport = true;
         }
         if foe.knockback.is_some() {
@@ -589,7 +615,13 @@ pub fn launcher_foe(
     let viewport_width = viewport_width(&window);
 
     for (mut foe, mut launcher, mut transform) in &mut query {
-        if !foe.entered_viewport && in_viewport(transform.translation, viewport_width, Vec2::ZERO) {
+        if !foe.entered_viewport
+            && in_viewport(
+                transform.translation,
+                viewport_width,
+                Vec2::splat(-FOE_SIZE),
+            )
+        {
             foe.entered_viewport = true;
         }
         if foe.knockback.is_some() {
@@ -712,7 +744,13 @@ pub fn tracking_foe(
     let viewport_width = viewport_width(&window);
 
     for (mut foe, mut transform) in &mut query {
-        if !foe.entered_viewport && in_viewport(transform.translation, viewport_width, Vec2::ZERO) {
+        if !foe.entered_viewport
+            && in_viewport(
+                transform.translation,
+                viewport_width,
+                Vec2::splat(-FOE_SIZE),
+            )
+        {
             foe.entered_viewport = true;
         }
         let dt = time.delta_secs();
@@ -1426,22 +1464,20 @@ pub fn slowdown_time(
 }
 
 pub fn update_countdown_indicators(
-    mut indicators: Query<(&mut Transform, &mut Visibility, &ChildOf), With<CountdownIndicator>>,
+    mut indicators: Query<(&mut Transform, &ChildOf), With<CountdownIndicator>>,
     summoners: Query<&Summoner>,
     launchers: Query<&Launcher>,
 ) {
-    for (mut transform, mut visibility, child_of) in &mut indicators {
+    for (mut transform, child_of) in &mut indicators {
         let parent = child_of.parent();
         if let Ok(summoner) = summoners.get(parent) {
             let progress = summoner.since / summoner.delay;
-            let scale = COUNTDOWN_START_SCALE - (COUNTDOWN_START_SCALE - 1.0) * progress;
-            transform.scale = Vec3::splat(scale);
-            *visibility = Visibility::Inherited;
+            transform.scale =
+                Vec3::splat(COUNTDOWN_START_SCALE - (COUNTDOWN_START_SCALE - 1.0) * progress);
         } else if let Ok(launcher) = launchers.get(parent) {
             let progress = (launcher.since / launcher.delay).min(1.0);
-            let scale = COUNTDOWN_START_SCALE - (COUNTDOWN_START_SCALE - 1.0) * progress;
-            transform.scale = Vec3::splat(scale);
-            *visibility = Visibility::Inherited;
+            transform.scale =
+                Vec3::splat(COUNTDOWN_START_SCALE - (COUNTDOWN_START_SCALE - 1.0) * progress);
         }
     }
 }
