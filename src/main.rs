@@ -31,9 +31,9 @@ const INDICATOR_RADIUS: f32 = 1.5 * PLAYER_RADIUS;
 const INDICATOR_LONG_RECTANGLE_LENGTH: f32 = INDICATOR_THICKNESS * 3.;
 const EXPLOSION_PARTICLE_RADIUS_LOWER: f32 = PLAYER_RADIUS / 10.;
 const EXPLOSION_PARTICLE_RADIUS_UPPER: f32 = PLAYER_RADIUS / 5.;
-const PLAYER_AIM_RING_RADIUS: f32 = PLAYER_RADIUS * 1.2;
-const PLAYER_AIM_RING_THICKNESS: f32 = INDICATOR_THICKNESS / 1.5;
-const PLAYER_AIM_NOTCH_RADIUS: f32 = PLAYER_RADIUS * 0.15;
+const PLAYER_RING_RADIUS: f32 = PLAYER_RADIUS * 1.2;
+const PLAYER_RING_THICKNESS: f32 = INDICATOR_THICKNESS / 1.5;
+const PLAYER_NOTCH_RADIUS: f32 = PLAYER_RADIUS * 0.15;
 const HEXAGON_LAUNCHER_LENGTH: f32 = FOE_SIZE * 1.5;
 const HEXAGON_LAUNCHER_WIDTH: f32 = OBSTACLE_RADIUS * 2.;
 const PENTAGON_LAUNCHER_LENGTH: f32 = FOE_SIZE * 1.2;
@@ -97,6 +97,12 @@ const LAUNCH_RECOIL_SPEED: f32 = FOE_SIZE * 1.5;
 const LAUNCHER_ARM_RECOIL_DURATION: f32 = 0.25;
 const LAUNCHER_ARM_RECOIL_MIN_SCALE: f32 = 0.3;
 
+const COMBO_THRESHOLD: usize = 30;
+const SHOCKWAVE_SPEED: f32 = PLAYER_MOVEMENT_SPEED * 2.;
+const SHOCKWAVE_THICKNESS: f32 = PLAYER_RADIUS / 10.;
+const SHOCKWAVE_OBSTACLE_SPEED: f32 = OBSTACLE_MOVEMENT_SPEED * 8.;
+const SHOCKWAVE_RESOLUTION: u32 = 128;
+
 const TRIANGLE_CENTERING_OFFSET_Y: f32 = FOE_SIZE / 3.;
 const TRIANGLE_LOCAL_POINTS: [Vec3; 3] = [
     Vec3::new(0., FOE_SIZE - TRIANGLE_CENTERING_OFFSET_Y, 0.),
@@ -153,12 +159,12 @@ fn spawner_foe_delay_mu(x: f32, max_dif: bool) -> f32 {
     if MIN_DELAY {
         SPAWN_DELTA
     } else {
-        7. * f32::exp(-0.07 * if max_dif { f32::MAX } else { x }) + 0.5
+        5. * f32::exp(-0.12 * if max_dif { f32::MAX } else { x }) + 0.5
     }
 }
 
-fn foe_weights(clock: f32, max_difficulty: bool) -> [f32; NUM_SHAPES] {
-    if max_difficulty || MIN_DELAY {
+fn foe_weights(clock: f32, max_dif: bool) -> [f32; NUM_SHAPES] {
+    if max_dif || MIN_DELAY {
         return *PHASE_WEIGHTS.last().unwrap();
     }
     let phase: usize = ((clock / PHASE_TIME) as usize).min(PHASE_WEIGHTS.len() - 1);
@@ -171,8 +177,9 @@ const OBSTACLE_Z_INDEX: f32 = 1.;
 const TRACKING_Z_INDEX: f32 = 2.;
 const SUMMONER_Z_INDEX: f32 = 3.;
 const HEXAGON_Z_INDEX: f32 = 4.;
-const PLAYER_Z_INDEX: f32 = 5.;
-const INDICATOR_Z_INDEX: f32 = 6.;
+const SHOCKWAVE_Z_INDEX: f32 = 5.;
+const PLAYER_Z_INDEX: f32 = 6.;
+const INDICATOR_Z_INDEX: f32 = 7.;
 const VIEWPORT_HEIGHT: f32 = 1000.;
 
 const SCORE_TEXT_PADDING: f32 = 10.;
@@ -210,6 +217,7 @@ mod colors {
     pub const INDICATOR: Color = YELLOW;
     pub const PROJECTILE: Color = FOREGROUND;
     pub const GLOW: Color = CYAN;
+    pub const LAUNCHER_NOTCH: Color = CYAN;
     pub const OBSTACLE: Color = CYAN;
     pub const PLAYER: Color = FOREGROUND;
     pub const LAUNCHER: Color = SELECTION;
@@ -468,6 +476,7 @@ fn game_plugin(app: &mut App) {
         despawn::<Indicator>,
         despawn::<Slowdown>,
         despawn::<Stats>,
+        despawn::<Shockwave>,
     );
     app.insert_resource(Mode::default())
         .add_systems(OnEnter(Screen::Game), game::setup)
@@ -530,6 +539,8 @@ fn game_plugin(app: &mut App) {
                 game::obstacle,
                 game::explosion_system,
                 game::update_countdown_indicators,
+                game::shockwave_system,
+                game::update_launcher_ring,
             )
                 .run_if(in_state(Screen::Game)),
         )
@@ -550,6 +561,7 @@ fn game_plugin(app: &mut App) {
                 game::despawner.after(msg::on_msg),
                 game::lock_enemy_text.before(TransformSystems::Propagate),
                 game::lock_enemy_text.after(msg::on_msg),
+                game::lock_launcher_ring.after(TransformSystems::Propagate),
             )
                 .run_if(in_state(Screen::Game)),
         )
@@ -626,6 +638,7 @@ enum GameMsg {
     DeSelect(Entity),
     Projectile(Entity, Vec3),
     GameEnd,
+    TriggerShockwave(Vec2),
 }
 
 #[derive(Message)]
@@ -702,8 +715,17 @@ struct Slowdown {
 }
 
 #[derive(Component)]
+struct Shockwave {
+    radius: f32,
+    material: Handle<ColorMaterial>,
+}
+
+#[derive(Component)]
+struct LauncherRing;
+
+#[derive(Component)]
 struct Obstacle {
-    direction: Vec2,
+    velocity: Vec2,
     colliding: bool,
 }
 
@@ -910,6 +932,9 @@ pub struct KeyboardOption;
 
 #[derive(Resource)]
 struct Clock(f32);
+
+#[derive(Resource)]
+struct Combo(usize);
 
 fn toggle_pause(mut msg: MessageWriter<PauseMsg>) {
     msg.write(PauseMsg::TogglePause);

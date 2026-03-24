@@ -511,11 +511,7 @@ pub fn settings_setup(mut commands: Commands, config: Res<Config>) {
                             option.insert(Active);
                         }
                         option.with_children(|b| {
-                            b.spawn((
-                                Text::new(button_text),
-                                font,
-                                TextColor(colors::BUTTON_TEXT),
-                            ));
+                            b.spawn((Text::new(button_text), font, TextColor(colors::BUTTON_TEXT)));
                         });
                     }
                 });

@@ -7,9 +7,13 @@ use bevy::{
         keyboard::{Key, KeyboardInput},
     },
     prelude::*,
+    render::render_resource::PrimitiveTopology,
 };
 use rand::{self, distr::Distribution};
-use std::{f32::consts::FRAC_PI_2, sync::Arc};
+use std::{
+    f32::consts::{FRAC_PI_2, TAU},
+    sync::Arc,
+};
 
 pub fn setup(
     mut commands: Commands,
@@ -42,18 +46,29 @@ pub fn setup(
             ))
             .with_children(|c| {
                 c.spawn((
-                    Mesh2d(meshes.add(Circle::new(PLAYER_AIM_NOTCH_RADIUS))),
-                    MeshMaterial2d(materials.add(colors::LAUNCHER)),
-                    Transform::from_xyz(0., PLAYER_AIM_RING_RADIUS, 1.),
+                    Mesh2d(meshes.add(Circle::new(PLAYER_NOTCH_RADIUS))),
+                    MeshMaterial2d(materials.add(colors::LAUNCHER_NOTCH)),
+                    Transform::from_xyz(0., PLAYER_RING_RADIUS, 1.),
                 ));
             });
             cmds.spawn((
                 Mesh2d(meshes.add(Annulus::new(
-                    PLAYER_AIM_RING_RADIUS - PLAYER_AIM_RING_THICKNESS / 2.,
-                    PLAYER_AIM_RING_RADIUS + PLAYER_AIM_RING_THICKNESS / 2.,
+                    PLAYER_RING_RADIUS - PLAYER_RING_THICKNESS / 2.,
+                    PLAYER_RING_RADIUS + PLAYER_RING_THICKNESS / 2.,
                 ))),
                 MeshMaterial2d(materials.add(colors::LAUNCHER)),
                 Transform::from_xyz(0., PLAYER_RADIUS / 2., 0.5),
+            ));
+            cmds.spawn((
+                LauncherRing,
+                Mesh2d(meshes.add(launcher_ring_mesh(
+                    PLAYER_RING_RADIUS - PLAYER_RING_THICKNESS / 2.,
+                    PLAYER_RING_RADIUS + PLAYER_RING_THICKNESS / 2.,
+                    0.,
+                ))),
+                MeshMaterial2d(materials.add(colors::GLOW)),
+                Transform::from_xyz(0., PLAYER_RADIUS / 2., 0.6),
+                Visibility::Hidden,
             ));
             cmds.spawn((
                 Mesh2d(meshes.add(Rectangle::new(
@@ -136,6 +151,7 @@ pub fn setup(
             running: true,
         },
     ));
+    commands.insert_resource(Combo(0));
     commands.insert_resource(Spawner {
         foe_dist: WeightedIndex::new(PHASE_WEIGHTS[0]).unwrap(),
         foe_delay: FIRST_FOE_SPAWN_DELAY,
@@ -163,6 +179,10 @@ pub fn setup(
         materials: colors::SHAPE_COLORS.map(|c| materials.add(c)),
     });
     commands.insert_resource(Clock(0.));
+}
+
+pub fn default_state(mut next_screen: ResMut<NextState<GameScreen>>) {
+    next_screen.set(GameScreen::default())
 }
 
 impl Shape {
@@ -276,9 +296,9 @@ impl Stats {
     pub fn show(&self, text: &mut Text) {
         **text = format!("{}", self.score);
     }
-    pub fn alter_score(&mut self, dif: isize) {
+    pub fn inc_score(&mut self, dif: usize) {
         if self.running {
-            self.score = self.score.saturating_add_signed(dif);
+            self.score += dif;
         }
     }
     pub fn save_high_score(&self, config: &mut ResMut<Config>, pkv: &mut ResMut<PkvStore>) {
@@ -326,6 +346,7 @@ pub fn keypress(
     time: ResMut<Time<Virtual>>,
     stats: Single<&mut Stats>,
     mut mode: ResMut<Mode>,
+    mut combo: ResMut<Combo>,
 ) {
     let (mut player, player_transform) = player.into_inner();
     if !stats.running {
@@ -356,7 +377,7 @@ pub fn keypress(
                     };
                 }
             }
-            Key::Backspace if *mode == Mode::Typing => {
+            Key::Backspace => {
                 msg.write(GameMsg::Invisible(*indicator));
                 if let Some(selected) = player.selected {
                     msg.write(GameMsg::DeSelect(selected));
@@ -371,6 +392,7 @@ pub fn keypress(
                     {
                         found_selected = true;
                         if key == selected_enemy.keys[selected_enemy.next_index] {
+                            advance_combo(&mut combo, player_transform, &mut msg);
                             selected_enemy.next_index += 1;
                             msg.write(GameMsg::Projectile(
                                 selected_entity,
@@ -389,6 +411,7 @@ pub fn keypress(
                             msg.write(GameMsg::DespawnText(selected_entity));
                             msg.write(GameMsg::AddText(selected_entity));
                         } else {
+                            combo.0 = 0;
                             audio.write(AudioMsg::UnmatchedKeypress);
                         }
                     }
@@ -429,6 +452,7 @@ pub fn keypress(
                                 );
                             }
 
+                            advance_combo(&mut combo, player_transform, &mut msg);
                             ce.next_index += 1;
                             msg.write(GameMsg::DespawnText(e));
                             msg.write(GameMsg::AddText(e));
@@ -438,6 +462,7 @@ pub fn keypress(
                             ));
                             audio.write(AudioMsg::ProjectileLaunch);
                         } else {
+                            combo.0 = 0;
                             audio.write(AudioMsg::UnmatchedKeypress);
                         }
                         if player.selected.is_none() {
@@ -451,9 +476,25 @@ pub fn keypress(
     }
 }
 
+fn advance_combo(
+    combo: &mut Combo,
+    player_transform: &Transform,
+    msg: &mut MessageWriter<GameMsg>,
+) {
+    combo.0 += 1;
+    if combo.0 >= COMBO_THRESHOLD {
+        msg.write(GameMsg::TriggerShockwave(
+            player_transform
+                .transform_point(Vec3::new(0., PLAYER_RADIUS / 2., 0.))
+                .xy(),
+        ));
+        combo.0 = 0;
+    }
+}
+
 fn projectile_spawn_location(player_trans: &Transform, launcher_trans: &Transform) -> Vec3 {
     player_trans
-        .transform_point(launcher_trans.transform_point(Vec3::new(0., PLAYER_AIM_RING_RADIUS, 0.)))
+        .transform_point(launcher_trans.transform_point(Vec3::new(0., PLAYER_RING_RADIUS, 0.)))
         .with_z(EXPLOSION_Z_INDEX)
 }
 
@@ -528,7 +569,7 @@ pub fn summoner(
         summoner.since += dt;
         if summoner.since >= summoner.delay {
             let direction = player.translation - transform.translation;
-            let angle = direction.y.atan2(direction.x) - std::f32::consts::FRAC_PI_2;
+            let angle = direction.y.atan2(direction.x) - FRAC_PI_2;
 
             let spawn_pos = children
                 .and_then(|ch| ch.iter().find_map(|c| launcher_query.get(c).ok()))
@@ -890,7 +931,7 @@ pub fn projectile(
                     audio.write(AudioMsg::Explosion);
                     msg.write(GameMsg::Despawn(target_entity));
 
-                    stats.alter_score(targeted_enemy.num_points() as isize);
+                    stats.inc_score(targeted_enemy.num_points());
                     score_change = true;
                 } else {
                     msg.write(GameMsg::DespawnText(target_entity));
@@ -1125,7 +1166,7 @@ pub fn enemy_collisions(
             if in_viewport(transform_a.translation, viewport_width, Vec2::ZERO)
                 && in_viewport(transform_b.translation, viewport_width, Vec2::ZERO)
             {
-                stats.alter_score(1);
+                stats.inc_score(1);
             }
             score_change = true;
         }
@@ -1378,8 +1419,10 @@ pub fn obstacle_collisions(
             let a_to_b = (b_transform.translation - a_transform.translation)
                 .xy()
                 .normalize();
-            a.direction = -1. * a_to_b / 2.;
-            b.direction = a_to_b / 2.;
+            let new_speed_a = (a.velocity.length() / 2.).max(OBSTACLE_MOVEMENT_SPEED / 4.);
+            let new_speed_b = (b.velocity.length() / 2.).max(OBSTACLE_MOVEMENT_SPEED / 4.);
+            a.velocity = -a_to_b * new_speed_a;
+            b.velocity = a_to_b * new_speed_b;
         }
     }
 }
@@ -1411,8 +1454,7 @@ pub fn obstacle(
             viewport_width,
             Vec2::splat(-OBSTACLE_RADIUS),
         );
-        transform.translation.x += o.direction.x * OBSTACLE_MOVEMENT_SPEED * dt;
-        transform.translation.y += o.direction.y * OBSTACLE_MOVEMENT_SPEED * dt;
+        transform.translation += o.velocity.extend(0.) * dt;
         if !in_viewport {
             msg.write(GameMsg::Despawn(ent));
         }
@@ -1423,21 +1465,6 @@ pub fn despawner(mut commands: Commands, despawn: Query<(Entity, &ToDespawn)>) {
     for (e, _) in despawn {
         commands.entity(e).despawn();
     }
-}
-
-pub fn lock_enemy_text(
-    mut text_query: Query<(&mut Transform, &ChildOf), (With<EnemyText>, Without<Foe>)>,
-    enemy_query: Query<&Transform, (With<Foe>, Without<EnemyText>)>,
-) {
-    for (mut text_transform, child_of) in text_query.iter_mut() {
-        if let Ok(enemy_transform) = enemy_query.get(child_of.parent()) {
-            text_transform.rotation = enemy_transform.rotation.inverse();
-        }
-    }
-}
-
-pub fn default_state(mut next_screen: ResMut<NextState<GameScreen>>) {
-    next_screen.set(GameScreen::default())
 }
 
 pub fn slowdown_time(
@@ -1463,6 +1490,131 @@ pub fn slowdown_time(
     }
 }
 
+pub fn shockwave_system(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut shockwaves: Query<(Entity, &mut Shockwave, &Transform, &Mesh2d)>,
+    enemies: Query<(Entity, &Foe, &Transform), (With<Foe>, Without<ToDespawn>)>,
+    mut obstacles: Query<(Entity, &mut Obstacle, &Transform), Without<ToDespawn>>,
+    mut msg: MessageWriter<GameMsg>,
+    cache: Res<FoePointsCache>,
+    mut audio: MessageWriter<AudioMsg>,
+    stats: Single<(&mut Stats, &mut Text)>,
+    time: Res<Time<Virtual>>,
+    window: Single<&Window>,
+) {
+    let dt = time.delta_secs();
+    let vp_width = viewport_width(&window);
+    let (mut stats_inner, mut score_text) = stats.into_inner();
+    let max_radius =
+        (VIEWPORT_HEIGHT * window.width() / window.height()).max(VIEWPORT_HEIGHT) * 1.2;
+    let mut score_changed = false;
+
+    for (sw_entity, mut sw, sw_transform, mesh2d) in shockwaves.iter_mut() {
+        sw.radius += SHOCKWAVE_SPEED * dt;
+        let inner = (sw.radius - SHOCKWAVE_THICKNESS / 2.).max(0.);
+        let outer = sw.radius + SHOCKWAVE_THICKNESS / 2.;
+
+        if let Some(mesh) = meshes.get_mut(mesh2d.id()) {
+            *mesh = Annulus::new(inner, outer)
+                .mesh()
+                .resolution(SHOCKWAVE_RESOLUTION)
+                .build();
+        }
+
+        if let Some(mat) = materials.get_mut(&sw.material) {
+            let fade = (1. - sw.radius / max_radius).max(0.);
+            mat.color = colors::GLOW.with_alpha(fade * 0.85);
+        }
+
+        let sw_center = sw_transform.translation.xy();
+
+        for (e_entity, foe, e_transform) in &enemies {
+            let Some(points) = cache.0.get(&e_entity) else {
+                continue;
+            };
+            let pts = &points.data[..points.len];
+            let in_outer = circle_polygon_collide(sw_center, outer, pts).is_some();
+            let in_inner = pts.iter().all(|p| p.xy().distance(sw_center) <= inner);
+            if in_outer && !in_inner {
+                msg.write(GameMsg::Explosion(e_transform.translation.xy()));
+                if in_viewport(e_transform.translation, vp_width, Vec2::ZERO) {
+                    audio.write(AudioMsg::Explosion);
+                }
+                msg.write(GameMsg::Despawn(e_entity));
+                stats_inner.inc_score(foe.num_points());
+                score_changed = true;
+            }
+        }
+
+        for (_, mut obstacle, o_transform) in &mut obstacles {
+            let dist = (o_transform.translation.xy() - sw_center).length();
+            if dist - OBSTACLE_RADIUS <= outer && dist + OBSTACLE_RADIUS >= inner {
+                obstacle.velocity = (o_transform.translation.xy() - sw_center).normalize_or_zero()
+                    * SHOCKWAVE_OBSTACLE_SPEED;
+            }
+        }
+
+        if sw.radius > max_radius {
+            commands.entity(sw_entity).despawn();
+        }
+    }
+    if score_changed {
+        stats_inner.show(&mut score_text);
+    }
+}
+
+fn launcher_ring_mesh(inner_r: f32, outer_r: f32, progress: f32) -> Mesh {
+    let segments = 64;
+    let filled = ((segments as f32 * progress).ceil() as usize).min(segments);
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity((filled + 1) * 2);
+    let mut indices: Vec<u32> = Vec::with_capacity((filled + 1) * 2);
+    for i in 0..=filled {
+        let t = if i == filled {
+            progress
+        } else {
+            i as f32 / segments as f32
+        };
+        let theta = FRAC_PI_2 - t * TAU;
+        let (sin, cos) = theta.sin_cos();
+        positions.push([outer_r * cos, outer_r * sin, 0.]);
+        positions.push([inner_r * cos, inner_r * sin, 0.]);
+        indices.push((i * 2) as u32);
+        indices.push((i * 2 + 1) as u32);
+    }
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleStrip,
+        bevy::asset::RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_indices(bevy::mesh::Indices::U32(indices));
+    mesh
+}
+
+pub fn update_launcher_ring(
+    combo: Res<Combo>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    ring: Single<(&Mesh2d, &mut Visibility), With<LauncherRing>>,
+) {
+    if combo.is_changed() {
+        let progress = combo.0 as f32 / COMBO_THRESHOLD as f32;
+        let (mesh2d, mut visibility) = ring.into_inner();
+        if progress <= 0. {
+            *visibility = Visibility::Hidden;
+        } else {
+            *visibility = Visibility::Visible;
+            if let Some(mesh) = meshes.get_mut(mesh2d.id()) {
+                *mesh = launcher_ring_mesh(
+                    PLAYER_RING_RADIUS - PLAYER_RING_THICKNESS / 2.,
+                    PLAYER_RING_RADIUS + PLAYER_RING_THICKNESS / 2.,
+                    progress,
+                );
+            }
+        }
+    }
+}
+
 pub fn update_countdown_indicators(
     mut indicators: Query<(&mut Transform, &ChildOf), With<CountdownIndicator>>,
     summoners: Query<&Summoner>,
@@ -1479,5 +1631,26 @@ pub fn update_countdown_indicators(
             transform.scale =
                 Vec3::splat(COUNTDOWN_START_SCALE - (COUNTDOWN_START_SCALE - 1.0) * progress);
         }
+    }
+}
+
+pub fn lock_enemy_text(
+    mut text_query: Query<(&mut Transform, &ChildOf), (With<EnemyText>, Without<Foe>)>,
+    enemy_query: Query<&Transform, (With<Foe>, Without<EnemyText>)>,
+) {
+    for (mut text_transform, child_of) in text_query.iter_mut() {
+        if let Ok(enemy_transform) = enemy_query.get(child_of.parent()) {
+            text_transform.rotation = enemy_transform.rotation.inverse();
+        }
+    }
+}
+
+pub fn lock_launcher_ring(
+    player: Single<&GlobalTransform, With<Player>>,
+    mut ring: Query<&mut Transform, (With<LauncherRing>, Without<Player>)>,
+) {
+    let (_, rotation, _) = player.to_scale_rotation_translation();
+    for mut t in ring.iter_mut() {
+        t.rotation = rotation.inverse();
     }
 }

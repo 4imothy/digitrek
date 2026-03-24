@@ -43,6 +43,7 @@ pub fn on_msg(
     mut pkv: ResMut<PkvStore>,
     window: Single<&Window>,
     shape_assets: Res<ShapeAssets>,
+    shockwaves: Query<(&Shockwave, &Transform)>,
 ) {
     let viewport_width = window.width() * VIEWPORT_HEIGHT / window.height();
     for msg in msg.read() {
@@ -90,28 +91,32 @@ pub fn on_msg(
                 }
             }
             GameMsg::SpawnFoe(shape, pos, spawned_by, rot) => {
-                spawn_foe(
-                    &mut commands,
-                    &mut meshes,
-                    &mut materials,
-                    *shape,
-                    *pos,
-                    *rot,
-                    *spawned_by,
-                    viewport_width,
-                    &shape_assets,
-                );
+                if !inside_shockwave(*pos, &shockwaves) {
+                    spawn_foe(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        *shape,
+                        *pos,
+                        *rot,
+                        *spawned_by,
+                        viewport_width,
+                        &shape_assets,
+                    );
+                }
             }
             GameMsg::SpawnObstacle(pos, direction) => {
-                commands.spawn((
-                    Obstacle {
-                        direction: *direction,
-                        colliding: false,
-                    },
-                    Mesh2d(meshes.add(Circle::new(OBSTACLE_RADIUS))),
-                    MeshMaterial2d(materials.add(colors::OBSTACLE)),
-                    Transform::from_translation(pos.extend(OBSTACLE_Z_INDEX)),
-                ));
+                if !inside_shockwave(*pos, &shockwaves) {
+                    commands.spawn((
+                        Obstacle {
+                            velocity: *direction * OBSTACLE_MOVEMENT_SPEED,
+                            colliding: false,
+                        },
+                        Mesh2d(meshes.add(Circle::new(OBSTACLE_RADIUS))),
+                        MeshMaterial2d(materials.add(colors::OBSTACLE)),
+                        Transform::from_translation(pos.extend(OBSTACLE_Z_INDEX)),
+                    ));
+                }
             }
             GameMsg::Invisible(entity) => {
                 commands.entity(*entity).insert(Visibility::Hidden);
@@ -141,8 +146,36 @@ pub fn on_msg(
                     time: GAME_OVER_SLOWDOWN_REAL_TIME,
                 });
             }
+            GameMsg::TriggerShockwave(pos) => {
+                let mat = materials.add(colors::GLOW.with_alpha(0.85));
+                commands.spawn((
+                    Shockwave {
+                        radius: PLAYER_RING_RADIUS,
+                        material: mat.clone(),
+                    },
+                    Mesh2d(
+                        meshes.add(
+                            Annulus::new(
+                                (PLAYER_RING_RADIUS - SHOCKWAVE_THICKNESS / 2.).max(0.),
+                                PLAYER_RING_RADIUS + SHOCKWAVE_THICKNESS / 2.,
+                            )
+                            .mesh()
+                            .resolution(SHOCKWAVE_RESOLUTION)
+                            .build(),
+                        ),
+                    ),
+                    MeshMaterial2d(mat),
+                    Transform::from_translation(pos.extend(SHOCKWAVE_Z_INDEX)),
+                ));
+            }
         }
     }
+}
+
+fn inside_shockwave(pos: Vec2, shockwaves: &Query<(&Shockwave, &Transform)>) -> bool {
+    shockwaves
+        .iter()
+        .any(|(sw, t)| pos.distance(t.translation.xy()) < sw.radius + SHOCKWAVE_THICKNESS / 2.)
 }
 
 fn spawn_explosion(
