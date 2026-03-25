@@ -19,12 +19,10 @@ pub enum Label {
     ProgrammingLanguage,
     GameEngine,
     Palette,
-    LaunchProjectileSound,
-    ExplosionSound,
-    MistypeSound,
     SpaceGrotesk,
     FontForge,
     FFmpeg,
+    Bfxr,
     Source,
     Help,
     Resume,
@@ -49,10 +47,8 @@ impl Label {
             Label::ProgrammingLanguage => credits::PROGRAMMING_LANGUAGE_LINK,
             Label::GameEngine => credits::GAME_ENGINE_LINK,
             Label::Palette => credits::PALETTE_LINK,
-            Label::LaunchProjectileSound => credits::LAUNCH_PROJECTILE_SOUND_LINK,
-            Label::ExplosionSound => credits::EXPLOSION_SOUND_LINK,
-            Label::MistypeSound => credits::MISTYPE_SOUND_LINK,
             Label::SpaceGrotesk => credits::SPACE_GROTESK_LINK,
+            Label::Bfxr => credits::BFXR_LINK,
             Label::FontForge => credits::FONTFORGE_LINK,
             Label::FFmpeg => credits::FFMPEG_LINK,
             Label::Source => credits::SOURCE_LINK,
@@ -314,12 +310,10 @@ fn do_action(
         Label::ProgrammingLanguage
         | Label::GameEngine
         | Label::Palette
-        | Label::LaunchProjectileSound
-        | Label::ExplosionSound
-        | Label::MistypeSound
         | Label::SpaceGrotesk
         | Label::FontForge
         | Label::FFmpeg
+        | Label::Bfxr
         | Label::Source => {
             #[cfg(not(target_arch = "wasm32"))]
             let _ = open::that(action.to_link());
@@ -616,7 +610,7 @@ pub fn credits_setup(mut commands: Commands) {
                     })
                     .with_children(|col| {
                         col.spawn((
-                            Text::new("tools"),
+                            Text::new("programming"),
                             title_font.clone(),
                             TextColor(colors::LABEL),
                             Node {
@@ -638,20 +632,7 @@ pub fn credits_setup(mut commands: Commands) {
                             false,
                             font.clone(),
                         );
-                        spawn_button(
-                            col,
-                            Label::FontForge,
-                            credits::FONTFORGE_TEXT,
-                            false,
-                            font.clone(),
-                        );
-                        spawn_button(
-                            col,
-                            Label::FFmpeg,
-                            credits::FFMPEG_TEXT,
-                            false,
-                            font.clone(),
-                        );
+                        spawn_button(col, Label::Source, credits::SOURCE_TEXT, false, font.clone());
                     });
                     row.spawn(Node {
                         flex_direction: FlexDirection::Column,
@@ -677,50 +658,58 @@ pub fn credits_setup(mut commands: Commands) {
                         );
                         spawn_button(
                             col,
+                            Label::FontForge,
+                            credits::FONTFORGE_TEXT,
+                            false,
+                            font.clone(),
+                        );
+                        spawn_button(
+                            col,
                             Label::Palette,
                             credits::PALETTE_TEXT,
                             false,
                             font.clone(),
                         );
-                        col.spawn((
-                            Text::new("sounds"),
-                            title_font.clone(),
-                            TextColor(colors::LABEL),
-                            Node {
-                                margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Vh(2.), Val::Vh(1.)),
-                                ..default()
-                            },
-                        ));
-                        spawn_button(
-                            col,
-                            Label::LaunchProjectileSound,
-                            credits::LAUNCH_PROJECTILE_SOUND_TEXT,
-                            false,
-                            font.clone(),
-                        );
-                        spawn_button(
-                            col,
-                            Label::ExplosionSound,
-                            credits::EXPLOSION_SOUND_TEXT,
-                            false,
-                            font.clone(),
-                        );
-                        spawn_button(
-                            col,
-                            Label::MistypeSound,
-                            credits::MISTYPE_SOUND_TEXT,
-                            false,
-                            font.clone(),
-                        );
                     });
                 });
-            spawn_button(
-                screen,
-                Label::Source,
-                credits::SOURCE_TEXT,
-                false,
-                font.clone(),
-            );
+            screen
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    ..default()
+                })
+                .with_children(|audio| {
+                    audio.spawn((
+                        Text::new("audio"),
+                        title_font.clone(),
+                        TextColor(colors::LABEL),
+                        Node {
+                            margin: UiRect::bottom(Val::Vh(1.)),
+                            ..default()
+                        },
+                    ));
+                    audio
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            ..default()
+                        })
+                        .with_children(|audio_row| {
+                            spawn_button(
+                                audio_row,
+                                Label::Bfxr,
+                                credits::BFXR_TEXT,
+                                false,
+                                font.clone(),
+                            );
+                            spawn_button(
+                                audio_row,
+                                Label::FFmpeg,
+                                credits::FFMPEG_TEXT,
+                                false,
+                                font.clone(),
+                            );
+                        });
+                });
             spawn_button(screen, Label::Back, "back", false, font.clone());
         });
 }
@@ -854,12 +843,12 @@ pub fn keypress_navigate(
     let next_selection = match (selected_label, v_dir, h_dir) {
         (Label::ProgrammingLanguage, 0, 1) => Some(Label::SpaceGrotesk),
         (Label::SpaceGrotesk, 0, -1) => Some(Label::ProgrammingLanguage),
-        (Label::GameEngine, 0, 1) => Some(Label::Palette),
-        (Label::Palette, 0, -1) => Some(Label::GameEngine),
-        (Label::FontForge, 0, 1) => Some(Label::LaunchProjectileSound),
-        (Label::LaunchProjectileSound, 0, -1) => Some(Label::FontForge),
-        (Label::FFmpeg, 0, 1) => Some(Label::ExplosionSound),
-        (Label::ExplosionSound, 0, -1) => Some(Label::FFmpeg),
+        (Label::GameEngine, 0, 1) => Some(Label::FontForge),
+        (Label::FontForge, 0, -1) => Some(Label::GameEngine),
+        (Label::Source, 0, 1) => Some(Label::Palette),
+        (Label::Palette, 0, -1) => Some(Label::Source),
+        (Label::Bfxr, 0, 1) => Some(Label::FFmpeg),
+        (Label::FFmpeg, 0, -1) => Some(Label::Bfxr),
         (Label::Play, 1, _) => Some(Label::Help),
         (Label::Play, -1, _) => {
             if cfg!(target_arch = "wasm32") {
@@ -898,24 +887,20 @@ pub fn keypress_navigate(
         (Label::MaxDifficulty, -1, _) => Some(Label::PhysicalKeyboardLayout),
         (Label::ProgrammingLanguage, 1, _) => Some(Label::GameEngine),
         (Label::ProgrammingLanguage, -1, _) => Some(Label::Back),
-        (Label::GameEngine, 1, _) => Some(Label::FontForge),
+        (Label::GameEngine, 1, _) => Some(Label::Source),
         (Label::GameEngine, -1, _) => Some(Label::ProgrammingLanguage),
-        (Label::FontForge, 1, _) => Some(Label::FFmpeg),
-        (Label::FontForge, -1, _) => Some(Label::GameEngine),
-        (Label::FFmpeg, 1, _) => Some(Label::Source),
-        (Label::FFmpeg, -1, _) => Some(Label::FontForge),
-        (Label::SpaceGrotesk, 1, _) => Some(Label::Palette),
+        (Label::Source, 1, _) => Some(Label::Bfxr),
+        (Label::Source, -1, _) => Some(Label::GameEngine),
+        (Label::SpaceGrotesk, 1, _) => Some(Label::FontForge),
         (Label::SpaceGrotesk, -1, _) => Some(Label::Back),
-        (Label::Palette, 1, _) => Some(Label::LaunchProjectileSound),
-        (Label::Palette, -1, _) => Some(Label::SpaceGrotesk),
-        (Label::LaunchProjectileSound, 1, _) => Some(Label::ExplosionSound),
-        (Label::LaunchProjectileSound, -1, _) => Some(Label::Palette),
-        (Label::ExplosionSound, 1, _) => Some(Label::MistypeSound),
-        (Label::ExplosionSound, -1, _) => Some(Label::LaunchProjectileSound),
-        (Label::MistypeSound, 1, _) => Some(Label::Source),
-        (Label::MistypeSound, -1, _) => Some(Label::ExplosionSound),
-        (Label::Source, 1, _) => Some(Label::Back),
-        (Label::Source, -1, _) => Some(Label::MistypeSound),
+        (Label::FontForge, 1, _) => Some(Label::Palette),
+        (Label::FontForge, -1, _) => Some(Label::SpaceGrotesk),
+        (Label::Palette, 1, _) => Some(Label::FFmpeg),
+        (Label::Palette, -1, _) => Some(Label::FontForge),
+        (Label::Bfxr, 1, _) => Some(Label::Back),
+        (Label::Bfxr, -1, _) => Some(Label::Source),
+        (Label::FFmpeg, 1, _) => Some(Label::Back),
+        (Label::FFmpeg, -1, _) => Some(Label::Palette),
         (Label::Resume, 1, _) => Some(Label::GameSettings),
         (Label::Resume, -1, _) => Some(Label::Back),
         (Label::GameSettings, 1, _) => Some(Label::Back),
@@ -932,7 +917,7 @@ pub fn keypress_navigate(
         },
         (Label::Back, -1, _) => match (**screen, **game_screen) {
             (Screen::Settings, _) => Some(Label::MaxDifficulty),
-            (Screen::Credits, _) => Some(Label::Source),
+            (Screen::Credits, _) => Some(Label::Bfxr),
             (Screen::Game, GameScreen::Settings) => Some(Label::Volume),
             (Screen::Game, GameScreen::Pause) => Some(Label::GameSettings),
             (Screen::Game, GameScreen::End) => Some(Label::PlayAgain),

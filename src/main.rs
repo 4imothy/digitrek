@@ -731,9 +731,10 @@ struct Obstacle {
 
 #[derive(Resource)]
 struct AudioAssets {
-    pub projectile_launch: Handle<AudioSource>,
     pub unmatched_keypress: Handle<AudioSource>,
     pub explosion: Handle<AudioSource>,
+    pub shockwave: Handle<AudioSource>,
+    pub foe_launch: Handle<AudioSource>,
 }
 
 #[derive(Resource)]
@@ -760,17 +761,19 @@ pub fn title_font() -> TextFont {
 
 #[derive(Message)]
 pub enum AudioMsg {
-    ProjectileLaunch,
     Explosion,
     UnmatchedKeypress,
+    Shockwave,
+    FoeLaunch,
 }
 
 impl AudioMsg {
     fn sound(&self, sounds: &Res<AudioAssets>) -> Handle<AudioSource> {
         match self {
-            AudioMsg::ProjectileLaunch => sounds.projectile_launch.clone(),
             AudioMsg::Explosion => sounds.explosion.clone(),
             AudioMsg::UnmatchedKeypress => sounds.unmatched_keypress.clone(),
+            AudioMsg::Shockwave => sounds.shockwave.clone(),
+            AudioMsg::FoeLaunch => sounds.foe_launch.clone(),
         }
     }
 }

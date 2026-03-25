@@ -159,14 +159,17 @@ pub fn setup(
         last_side: 0,
     });
     commands.insert_resource(AudioAssets {
-        projectile_launch: audio.add(AudioSource {
-            bytes: Arc::from(*include_bytes!("../assets/launch.ogg")),
-        }),
         unmatched_keypress: audio.add(AudioSource {
-            bytes: Arc::from(*include_bytes!("../assets/mistype.ogg")),
+            bytes: Arc::from(*include_bytes!("../assets/miss.ogg")),
         }),
         explosion: audio.add(AudioSource {
-            bytes: Arc::from(*include_bytes!("../assets/explosion.ogg")),
+            bytes: Arc::from(*include_bytes!("../assets/boom.ogg")),
+        }),
+        shockwave: audio.add(AudioSource {
+            bytes: Arc::from(*include_bytes!("../assets/wave.ogg")),
+        }),
+        foe_launch: audio.add(AudioSource {
+            bytes: Arc::from(*include_bytes!("../assets/launch.ogg")),
         }),
     });
     commands.insert_resource(ShapeAssets {
@@ -392,13 +395,12 @@ pub fn keypress(
                     {
                         found_selected = true;
                         if key == selected_enemy.keys[selected_enemy.next_index] {
-                            advance_combo(&mut combo, player_transform, &mut msg);
+                            advance_combo(&mut combo, player_transform, &mut msg, &mut audio);
                             selected_enemy.next_index += 1;
                             msg.write(GameMsg::Projectile(
                                 selected_entity,
                                 projectile_spawn_location(player_transform, &launcher_transform),
                             ));
-                            audio.write(AudioMsg::ProjectileLaunch);
                             if selected_enemy
                                 .orig_len
                                 .saturating_sub(selected_enemy.next_index + selected_enemy.skipped)
@@ -452,7 +454,7 @@ pub fn keypress(
                                 );
                             }
 
-                            advance_combo(&mut combo, player_transform, &mut msg);
+                            advance_combo(&mut combo, player_transform, &mut msg, &mut audio);
                             ce.next_index += 1;
                             msg.write(GameMsg::DespawnText(e));
                             msg.write(GameMsg::AddText(e));
@@ -460,7 +462,6 @@ pub fn keypress(
                                 e,
                                 projectile_spawn_location(player_transform, &launcher_transform),
                             ));
-                            audio.write(AudioMsg::ProjectileLaunch);
                         } else {
                             combo.0 = 0;
                             audio.write(AudioMsg::UnmatchedKeypress);
@@ -480,6 +481,7 @@ fn advance_combo(
     combo: &mut Combo,
     player_transform: &Transform,
     msg: &mut MessageWriter<GameMsg>,
+    audio: &mut MessageWriter<AudioMsg>,
 ) {
     combo.0 += 1;
     if combo.0 >= COMBO_THRESHOLD {
@@ -488,6 +490,7 @@ fn advance_combo(
                 .transform_point(Vec3::new(0., PLAYER_RADIUS / 2., 0.))
                 .xy(),
         ));
+        audio.write(AudioMsg::Shockwave);
         combo.0 = 0;
     }
 }
@@ -583,7 +586,7 @@ pub fn summoner(
 
             let shape = SHAPES[summoner.foe_dist.sample(&mut rng)];
             msg.write(GameMsg::SpawnFoe(shape, spawn_pos, Some(ent), Some(angle)));
-            audio.write(AudioMsg::ProjectileLaunch);
+            audio.write(AudioMsg::FoeLaunch);
             summoner.since = 0.;
 
             let recoil_dir = -direction.xy().normalize_or_zero();
@@ -714,8 +717,7 @@ pub fn foe_launcher(
                     let direction = (player.translation.xy() - hex_transform.translation.xy())
                         .normalize_or_zero();
                     msg.write(GameMsg::SpawnObstacle(tip_world.xy(), direction));
-                    audio.write(AudioMsg::ProjectileLaunch);
-
+                    audio.write(AudioMsg::FoeLaunch);
                     foe.knockback = Some(-direction * LAUNCH_RECOIL_SPEED);
                     launcher.stopped = false;
                     foe_launcher.recoil = 1.0;

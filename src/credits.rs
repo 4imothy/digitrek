@@ -9,14 +9,8 @@ pub const GAME_ENGINE_LINK: &str = "https://bevy.org";
 pub const PALETTE_TEXT: &str = "dracula palette";
 pub const PALETTE_LINK: &str = "https://draculatheme.com";
 
-pub const LAUNCH_PROJECTILE_SOUND_TEXT: &str = "launch by u_y3wk5ympz8";
-pub const LAUNCH_PROJECTILE_SOUND_LINK: &str = "https://pixabay.com/users/u_y3wk5ympz8-47045027/?utm_source=link-attribution&utm_medium=referral&utm_campaign=music&utm_content=264682";
-
-pub const EXPLOSION_SOUND_TEXT: &str = "explosion by freesound_community";
-pub const EXPLOSION_SOUND_LINK: &str = "https://pixabay.com/users/freesound_community-46691455/?utm_source=link-attribution&utm_medium=referral&utm_campaign=music&utm_content=79814";
-
-pub const MISTYPE_SOUND_TEXT: &str = "mistype by u_8g40a9z0la";
-pub const MISTYPE_SOUND_LINK: &str = "https://pixabay.com/users/u_8g40a9z0la-45586904/?utm_source=link-attribution&utm_medium=referral&utm_campaign=music&utm_content=234708";
+pub const BFXR_TEXT: &str = "bfxr for creating sounds";
+pub const BFXR_LINK: &str = "https://www.bfxr.net";
 
 pub const SOURCE_TEXT: &str = "source code";
 pub const SOURCE_LINK: &str = "https://github.com/4imothy/digitrek";
@@ -24,7 +18,7 @@ pub const SOURCE_LINK: &str = "https://github.com/4imothy/digitrek";
 pub const SPACE_GROTESK_TEXT: &str = "space grotesk font";
 pub const SPACE_GROTESK_LINK: &str = "https://github.com/floriankarsten/space-grotesk";
 
-pub const FONTFORGE_TEXT: &str = "fontforge for editing font";
+pub const FONTFORGE_TEXT: &str = "fontforge for editing the font";
 pub const FONTFORGE_LINK: &str = "https://fontforge.org";
 
 pub const FFMPEG_TEXT: &str = "ffmpeg for editing sounds";
