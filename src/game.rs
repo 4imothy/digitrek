@@ -47,8 +47,9 @@ pub fn setup(
             .with_children(|c| {
                 c.spawn((
                     Mesh2d(meshes.add(Circle::new(PLAYER_NOTCH_RADIUS))),
-                    MeshMaterial2d(materials.add(colors::LAUNCHER_NOTCH)),
+                    MeshMaterial2d(materials.add(colors::LAUNCHER)),
                     Transform::from_xyz(0., PLAYER_RING_RADIUS, 1.),
+                    LauncherNotch,
                 ));
             });
             cmds.spawn((
@@ -336,10 +337,7 @@ pub fn keypress(
     mut keyboard_input: MessageReader<KeyboardInput>,
     player: Single<(&mut Player, &Transform), Without<PlayerLauncher>>,
     launcher: Single<&mut Transform, (With<PlayerLauncher>, Without<Player>)>,
-    player_material: Single<
-        &MeshMaterial2d<ColorMaterial>,
-        (With<Player>, Without<PlayerLauncher>),
-    >,
+    notch_material: Single<&MeshMaterial2d<ColorMaterial>, With<LauncherNotch>>,
     mut color_materials: ResMut<Assets<ColorMaterial>>,
     indicator: Single<Entity, (With<Indicator>, Without<Player>)>,
     mut enemy_query: Query<
@@ -358,7 +356,7 @@ pub fn keypress(
     }
     let mut found_selected = false;
     let mut launcher_transform = launcher.into_inner();
-    let player_material = player_material.into_inner();
+
     for key in keyboard_input.read() {
         if key.state != ButtonState::Pressed {
             continue;
@@ -372,15 +370,22 @@ pub fn keypress(
                     Mode::Movement => Mode::Typing,
                     Mode::Typing => Mode::Movement,
                 };
-                if let Some(mat) = color_materials.get_mut(player_material.id()) {
+                if let Some(mat) = color_materials.get_mut(notch_material.id()) {
                     mat.color = if *mode == Mode::Typing {
-                        colors::TYPING_INDICATOR
+                        colors::ACTIVE_NOTCH
                     } else {
-                        colors::PLAYER
+                        colors::LAUNCHER
                     };
                 }
             }
             Key::Backspace => {
+                msg.write(GameMsg::Invisible(*indicator));
+                if let Some(selected) = player.selected {
+                    msg.write(GameMsg::DeSelect(selected));
+                }
+                player.selected = None;
+            }
+            Key::Character(str) if str.as_str() == "." => {
                 msg.write(GameMsg::Invisible(*indicator));
                 if let Some(selected) = player.selected {
                     msg.write(GameMsg::DeSelect(selected));
@@ -1208,6 +1213,7 @@ pub fn player_collisions(
     mut msg: MessageWriter<GameMsg>,
     mut audio: MessageWriter<AudioMsg>,
     player: Single<(Entity, &Transform), With<Player>>,
+    indicator: Single<Entity, With<Indicator>>,
     mut stats: Single<&mut Stats>,
     cache: Res<FoePointsCache>,
 ) {
@@ -1245,6 +1251,7 @@ pub fn player_collisions(
             msg.write(GameMsg::Explosion(player_transform.translation.xy()));
             audio.write(AudioMsg::Explosion);
             msg.write(GameMsg::Invisible(player_entity));
+            msg.write(GameMsg::Invisible(*indicator));
             msg.write(GameMsg::GameEnd);
         }
         stats.running = false;
@@ -1521,7 +1528,7 @@ pub fn shockwave_system(
         if let Some(mesh) = meshes.get_mut(mesh2d.id()) {
             *mesh = Annulus::new(inner, outer)
                 .mesh()
-                .resolution(SHOCKWAVE_RESOLUTION)
+                .resolution(RING_RESOLUTIONS)
                 .build();
         }
 
@@ -1568,15 +1575,14 @@ pub fn shockwave_system(
 }
 
 fn launcher_ring_mesh(inner_r: f32, outer_r: f32, progress: f32) -> Mesh {
-    let segments = 64;
-    let filled = ((segments as f32 * progress).ceil() as usize).min(segments);
+    let filled = (RING_RESOLUTIONS as f32 * progress.clamp(0., 1.)).ceil() as usize;
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity((filled + 1) * 2);
     let mut indices: Vec<u32> = Vec::with_capacity((filled + 1) * 2);
     for i in 0..=filled {
         let t = if i == filled {
             progress
         } else {
-            i as f32 / segments as f32
+            i as f32 / RING_RESOLUTIONS as f32
         };
         let theta = FRAC_PI_2 - t * TAU;
         let (sin, cos) = theta.sin_cos();
@@ -1605,7 +1611,7 @@ pub fn update_launcher_ring(
         if progress <= 0. {
             *visibility = Visibility::Hidden;
         } else {
-            *visibility = Visibility::Visible;
+            *visibility = Visibility::Inherited;
             if let Some(mesh) = meshes.get_mut(mesh2d.id()) {
                 *mesh = launcher_ring_mesh(
                     PLAYER_RING_RADIUS - PLAYER_RING_THICKNESS / 2.,

@@ -24,6 +24,8 @@ pub enum Label {
     FFmpeg,
     Bfxr,
     Source,
+    Wordfreq,
+    GWordList,
     Help,
     Resume,
     GameSettings,
@@ -52,6 +54,8 @@ impl Label {
             Label::FontForge => credits::FONTFORGE_LINK,
             Label::FFmpeg => credits::FFMPEG_LINK,
             Label::Source => credits::SOURCE_LINK,
+            Label::Wordfreq => credits::WORDS_LINK,
+            Label::GWordList => credits::GWORDLIST_LINK,
             _ => unreachable!(),
         }
     }
@@ -314,7 +318,9 @@ fn do_action(
         | Label::FontForge
         | Label::FFmpeg
         | Label::Bfxr
-        | Label::Source => {
+        | Label::Source
+        | Label::Wordfreq
+        | Label::GWordList => {
             #[cfg(not(target_arch = "wasm32"))]
             let _ = open::that(action.to_link());
 
@@ -417,7 +423,7 @@ pub fn help_setup(mut commands: Commands, config: Res<Config>) {
                      press space to switch between movement and typing modes\n\
                      use {up}{left}{down}{right} or the arrow keys to move\n\
                      type the keys on a polygon to destroy it\n\
-                     press backspace to deselect a polygon",
+                     press backspace or . to deselect a polygon",
                     up = config.up_char(),
                     left = config.left_char(),
                     down = config.down_char(),
@@ -608,31 +614,74 @@ pub fn credits_setup(mut commands: Commands) {
                         align_items: AlignItems::Center,
                         ..default()
                     })
-                    .with_children(|col| {
-                        col.spawn((
-                            Text::new("programming"),
-                            title_font.clone(),
-                            TextColor(colors::LABEL),
-                            Node {
-                                margin: UiRect::bottom(Val::Vh(1.)),
-                                ..default()
-                            },
-                        ));
-                        spawn_button(
-                            col,
-                            Label::ProgrammingLanguage,
-                            credits::PROGRAMMING_LANGUAGE_TEXT,
-                            true,
-                            font.clone(),
-                        );
-                        spawn_button(
-                            col,
-                            Label::GameEngine,
-                            credits::GAME_ENGINE_TEXT,
-                            false,
-                            font.clone(),
-                        );
-                        spawn_button(col, Label::Source, credits::SOURCE_TEXT, false, font.clone());
+                    .with_children(|left| {
+                        left.spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        })
+                        .with_children(|col| {
+                            col.spawn((
+                                Text::new("programming"),
+                                title_font.clone(),
+                                TextColor(colors::LABEL),
+                                Node {
+                                    margin: UiRect::bottom(Val::Vh(1.)),
+                                    ..default()
+                                },
+                            ));
+                            spawn_button(
+                                col,
+                                Label::ProgrammingLanguage,
+                                credits::PROGRAMMING_LANGUAGE_TEXT,
+                                true,
+                                font.clone(),
+                            );
+                            spawn_button(
+                                col,
+                                Label::GameEngine,
+                                credits::GAME_ENGINE_TEXT,
+                                false,
+                                font.clone(),
+                            );
+                            spawn_button(
+                                col,
+                                Label::Source,
+                                credits::SOURCE_TEXT,
+                                false,
+                                font.clone(),
+                            );
+                        });
+                        left.spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        })
+                        .with_children(|col| {
+                            col.spawn((
+                                Text::new("visuals"),
+                                title_font.clone(),
+                                TextColor(colors::LABEL),
+                                Node {
+                                    margin: UiRect::bottom(Val::Vh(1.)),
+                                    ..default()
+                                },
+                            ));
+                            spawn_button(
+                                col,
+                                Label::SpaceGrotesk,
+                                credits::SPACE_GROTESK_TEXT,
+                                false,
+                                font.clone(),
+                            );
+                            spawn_button(
+                                col,
+                                Label::Palette,
+                                credits::PALETTE_TEXT,
+                                false,
+                                font.clone(),
+                            );
+                        });
                     });
                     row.spawn(Node {
                         flex_direction: FlexDirection::Column,
@@ -641,7 +690,7 @@ pub fn credits_setup(mut commands: Commands) {
                     })
                     .with_children(|col| {
                         col.spawn((
-                            Text::new("visuals"),
+                            Text::new("tools"),
                             title_font.clone(),
                             TextColor(colors::LABEL),
                             Node {
@@ -649,13 +698,7 @@ pub fn credits_setup(mut commands: Commands) {
                                 ..default()
                             },
                         ));
-                        spawn_button(
-                            col,
-                            Label::SpaceGrotesk,
-                            credits::SPACE_GROTESK_TEXT,
-                            false,
-                            font.clone(),
-                        );
+                        spawn_button(col, Label::Bfxr, credits::BFXR_TEXT, false, font.clone());
                         spawn_button(
                             col,
                             Label::FontForge,
@@ -665,50 +708,26 @@ pub fn credits_setup(mut commands: Commands) {
                         );
                         spawn_button(
                             col,
-                            Label::Palette,
-                            credits::PALETTE_TEXT,
+                            Label::Wordfreq,
+                            credits::WORDS_TEXT,
+                            false,
+                            font.clone(),
+                        );
+                        spawn_button(
+                            col,
+                            Label::GWordList,
+                            credits::GWORDLIST_TEXT,
+                            false,
+                            font.clone(),
+                        );
+                        spawn_button(
+                            col,
+                            Label::FFmpeg,
+                            credits::FFMPEG_TEXT,
                             false,
                             font.clone(),
                         );
                     });
-                });
-            screen
-                .spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    ..default()
-                })
-                .with_children(|audio| {
-                    audio.spawn((
-                        Text::new("audio"),
-                        title_font.clone(),
-                        TextColor(colors::LABEL),
-                        Node {
-                            margin: UiRect::bottom(Val::Vh(1.)),
-                            ..default()
-                        },
-                    ));
-                    audio
-                        .spawn(Node {
-                            flex_direction: FlexDirection::Row,
-                            ..default()
-                        })
-                        .with_children(|audio_row| {
-                            spawn_button(
-                                audio_row,
-                                Label::Bfxr,
-                                credits::BFXR_TEXT,
-                                false,
-                                font.clone(),
-                            );
-                            spawn_button(
-                                audio_row,
-                                Label::FFmpeg,
-                                credits::FFMPEG_TEXT,
-                                false,
-                                font.clone(),
-                            );
-                        });
                 });
             spawn_button(screen, Label::Back, "back", false, font.clone());
         });
@@ -841,14 +860,16 @@ pub fn keypress_navigate(
     };
 
     let next_selection = match (selected_label, v_dir, h_dir) {
-        (Label::ProgrammingLanguage, 0, 1) => Some(Label::SpaceGrotesk),
-        (Label::SpaceGrotesk, 0, -1) => Some(Label::ProgrammingLanguage),
-        (Label::GameEngine, 0, 1) => Some(Label::FontForge),
-        (Label::FontForge, 0, -1) => Some(Label::GameEngine),
-        (Label::Source, 0, 1) => Some(Label::Palette),
-        (Label::Palette, 0, -1) => Some(Label::Source),
-        (Label::Bfxr, 0, 1) => Some(Label::FFmpeg),
-        (Label::FFmpeg, 0, -1) => Some(Label::Bfxr),
+        (Label::ProgrammingLanguage, _, 1) => Some(Label::Bfxr),
+        (Label::GameEngine, _, 1) => Some(Label::FontForge),
+        (Label::FontForge, _, -1) => Some(Label::GameEngine),
+        (Label::Source, _, 1) => Some(Label::Wordfreq),
+        (Label::Wordfreq, _, -1) => Some(Label::Source),
+        (Label::SpaceGrotesk, _, 1) => Some(Label::GWordList),
+        (Label::GWordList, _, -1) => Some(Label::SpaceGrotesk),
+        (Label::Palette, _, 1) => Some(Label::FFmpeg),
+        (Label::FFmpeg, _, -1) => Some(Label::Palette),
+        (Label::Bfxr, _, -1) => Some(Label::ProgrammingLanguage),
         (Label::Play, 1, _) => Some(Label::Help),
         (Label::Play, -1, _) => {
             if cfg!(target_arch = "wasm32") {
@@ -889,18 +910,22 @@ pub fn keypress_navigate(
         (Label::ProgrammingLanguage, -1, _) => Some(Label::Back),
         (Label::GameEngine, 1, _) => Some(Label::Source),
         (Label::GameEngine, -1, _) => Some(Label::ProgrammingLanguage),
-        (Label::Source, 1, _) => Some(Label::Bfxr),
+        (Label::Source, 1, _) => Some(Label::SpaceGrotesk),
         (Label::Source, -1, _) => Some(Label::GameEngine),
-        (Label::SpaceGrotesk, 1, _) => Some(Label::FontForge),
-        (Label::SpaceGrotesk, -1, _) => Some(Label::Back),
-        (Label::FontForge, 1, _) => Some(Label::Palette),
-        (Label::FontForge, -1, _) => Some(Label::SpaceGrotesk),
-        (Label::Palette, 1, _) => Some(Label::FFmpeg),
-        (Label::Palette, -1, _) => Some(Label::FontForge),
-        (Label::Bfxr, 1, _) => Some(Label::Back),
-        (Label::Bfxr, -1, _) => Some(Label::Source),
+        (Label::SpaceGrotesk, 1, _) => Some(Label::Palette),
+        (Label::SpaceGrotesk, -1, _) => Some(Label::Source),
+        (Label::Palette, 1, _) => Some(Label::Back),
+        (Label::Palette, -1, _) => Some(Label::SpaceGrotesk),
+        (Label::Bfxr, 1, _) => Some(Label::FontForge),
+        (Label::Bfxr, -1, _) => Some(Label::Back),
+        (Label::FontForge, 1, _) => Some(Label::Wordfreq),
+        (Label::FontForge, -1, _) => Some(Label::Bfxr),
+        (Label::Wordfreq, 1, _) => Some(Label::GWordList),
+        (Label::Wordfreq, -1, _) => Some(Label::FontForge),
+        (Label::GWordList, 1, _) => Some(Label::FFmpeg),
+        (Label::GWordList, -1, _) => Some(Label::Wordfreq),
         (Label::FFmpeg, 1, _) => Some(Label::Back),
-        (Label::FFmpeg, -1, _) => Some(Label::Palette),
+        (Label::FFmpeg, -1, _) => Some(Label::GWordList),
         (Label::Resume, 1, _) => Some(Label::GameSettings),
         (Label::Resume, -1, _) => Some(Label::Back),
         (Label::GameSettings, 1, _) => Some(Label::Back),
@@ -917,7 +942,7 @@ pub fn keypress_navigate(
         },
         (Label::Back, -1, _) => match (**screen, **game_screen) {
             (Screen::Settings, _) => Some(Label::MaxDifficulty),
-            (Screen::Credits, _) => Some(Label::Bfxr),
+            (Screen::Credits, _) => Some(Label::FFmpeg),
             (Screen::Game, GameScreen::Settings) => Some(Label::Volume),
             (Screen::Game, GameScreen::Pause) => Some(Label::GameSettings),
             (Screen::Game, GameScreen::End) => Some(Label::PlayAgain),

@@ -38,6 +38,7 @@ pub fn on_msg(
     enemies: Query<&Foe, Without<ToDespawn>>,
     children_query: Query<&Children>,
     enemy_text_query: Query<(), With<EnemyText>>,
+    local_point_query: Query<(), With<LocalPoint>>,
     mut config: ResMut<Config>,
     stats: Single<&mut Stats>,
     mut pkv: ResMut<PkvStore>,
@@ -67,6 +68,28 @@ pub fn on_msg(
                 commands.entity(*entity).despawn_related::<Children>();
             }
             GameMsg::ReplaceShape(entity, shape) => {
+                if SHOW_LOCAL_POINTS {
+                    if let Ok(children) = children_query.get(*entity) {
+                        for child in children.iter() {
+                            if local_point_query.contains(child) {
+                                commands.entity(child).try_despawn();
+                            }
+                        }
+                    }
+                    let points = shape.local_points();
+                    let circle_mesh = meshes.add(Circle::new(10.));
+                    let circle_material = materials.add(Color::WHITE);
+                    commands.entity(*entity).with_children(|cmd| {
+                        for p in points {
+                            cmd.spawn((
+                                Mesh2d(circle_mesh.clone()),
+                                MeshMaterial2d(circle_material.clone()),
+                                Transform::from_xyz(p.x, p.y, PLAYER_Z_INDEX),
+                                LocalPoint,
+                            ));
+                        }
+                    });
+                }
                 replace_shape(
                     &mut commands,
                     &mut meshes,
@@ -83,6 +106,8 @@ pub fn on_msg(
                 {
                     add_text(
                         &mut cmd,
+                        &mut meshes,
+                        &mut materials,
                         &enemy.keys,
                         enemy.orig_len.saturating_sub(enemy.cleared + enemy.skipped),
                         enemy.cleared,
@@ -160,7 +185,7 @@ pub fn on_msg(
                                 PLAYER_RING_RADIUS + SHOCKWAVE_THICKNESS / 2.,
                             )
                             .mesh()
-                            .resolution(SHOCKWAVE_RESOLUTION)
+                            .resolution(RING_RESOLUTIONS)
                             .build(),
                         ),
                     ),
@@ -223,14 +248,33 @@ fn text_color(i: usize, next: usize) -> TextColor {
     })
 }
 
-fn add_text(cmd: &mut EntityCommands, keys: &[char], to_show: usize, cleared: usize, next: usize) {
+fn add_text(
+    cmd: &mut EntityCommands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<ColorMaterial>>,
+    keys: &[char],
+    to_show: usize,
+    cleared: usize,
+    next: usize,
+) {
+    let bg_width = to_show as f32 * FOE_WORD_BG_CHAR_WIDTH + FOE_WORD_BG_PADDING * 2.;
+    let bg_height = FOE_FONT_SIZE + FOE_WORD_BG_PADDING * 2.;
+    let bg_mesh = meshes.add(Rectangle::new(bg_width, bg_height));
+    let bg_mat = materials.add(colors::FOE_WORD_BG);
     cmd.with_children(|c| {
+        c.spawn((
+            Mesh2d(bg_mesh),
+            MeshMaterial2d(bg_mat),
+            Transform::from_xyz(0., 0., 0.1),
+            EnemyText,
+        ));
         let font = foe_font();
         let mut iter = keys.iter().enumerate().skip(cleared).take(to_show);
         if let Some((i, &ch)) = iter.next() {
             c.spawn((
                 Text2d::new(ch),
                 TextLayout::default(),
+                Transform::from_xyz(0., 0., 0.2),
                 font.clone(),
                 text_color(i, next),
                 EnemyText,
@@ -254,7 +298,7 @@ fn add_foe_launcher(
     countdown_sides: usize,
 ) {
     let mut arm_mesh = Mesh::new(
-        bevy::render::render_resource::PrimitiveTopology::TriangleStrip,
+        bevy::render::render_resource::PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
     );
     arm_mesh.insert_attribute(
@@ -336,13 +380,7 @@ fn spawn_foe(
         Shape::Hexagon => HEXAGON_Z_INDEX,
     };
 
-    let keys: [char; FOE_MAX_NUM_KEYS] = std::array::from_fn(|_| {
-        if ONE_KEY {
-            KEY_POOL[0]
-        } else {
-            KEY_POOL[rand::random_range(0..LEN_KEY_POOL)]
-        }
-    });
+    let keys = random_word(num_keys);
 
     let mut ent_cmds = commands.spawn((
         Mesh2d(mesh),
@@ -393,7 +431,7 @@ fn spawn_foe(
             );
         }
     }
-    add_text(&mut ent_cmds, &keys, num_keys, 0, 0);
+    add_text(&mut ent_cmds, meshes, materials, &keys, num_keys, 0, 0);
     let e = Foe::new(shape, keys, num_keys, spawned_by);
     ent_cmds.insert(e);
 
@@ -409,6 +447,7 @@ fn spawn_foe(
                     Mesh2d(circle_mesh.clone()),
                     MeshMaterial2d(circle_material.clone()),
                     Transform::from_xyz(p.x, p.y, PLAYER_Z_INDEX),
+                    LocalPoint,
                 ));
             }
         });

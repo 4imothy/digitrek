@@ -16,7 +16,6 @@ use std::{collections::HashMap, f32::consts::PI, sync::LazyLock};
 
 const SHOW_LOCAL_POINTS: bool = cfg!(feature = "show_local_points");
 const INVINCIBLE: bool = cfg!(feature = "invincible");
-const ONE_KEY: bool = cfg!(feature = "one_key");
 const MIN_DELAY: bool = cfg!(feature = "min_delay");
 const TIME_MULTIPLIER: f32 = if cfg!(feature = "speedup") { 5. } else { 1. };
 
@@ -42,10 +41,10 @@ const PENTAGON_LAUNCHER_WIDTH: f32 = FOE_SIZE;
 const PLAYER_MOVEMENT_SPEED: f32 = 400.;
 const PLAYER_ROTATION_SPEED: f32 = 4.;
 const SHAPE_MOV_SPEEDS: [f32; NUM_SHAPES] = [
-    PLAYER_MOVEMENT_SPEED / 4.,
     PLAYER_MOVEMENT_SPEED / 6.,
     PLAYER_MOVEMENT_SPEED / 8.,
     PLAYER_MOVEMENT_SPEED / 10.,
+    PLAYER_MOVEMENT_SPEED / 12.,
 ];
 const SHAPE_ROT_SPEEDS: [f32; NUM_SHAPES] = [
     PLAYER_ROTATION_SPEED / 6.,
@@ -60,6 +59,8 @@ const KNOCKBACK_MULTIPLIER: f32 = 1.5;
 const KNOCKBACK_STOP_SPEED: f32 = 15.;
 
 const FIRST_FOE_SPAWN_DELAY: f32 = 0.;
+const HEXAGON_LAUNCH_DELAY: f32 = 5.;
+const PENTAGON_SPAWN_DELAY: f32 = 6.;
 const SPAWN_DELTA: f32 = 0.3;
 const SPAWN_LOCATION_MULTIPLIER: f32 = 1.2;
 const NUM_SHAPES: usize = 4;
@@ -80,12 +81,13 @@ const PHASE_WEIGHTS: [[f32; NUM_SHAPES]; NUM_PHASE] = [
     [0.15, 0.20, 0.35, 0.30],
 ];
 
-const SHAPE_NUM_KEYS: [usize; NUM_SHAPES] = [1, 2, 3, 4];
+const SHAPE_NUM_KEYS: [usize; NUM_SHAPES] = [3, 4, 5, 6];
 const FOE_MAX_NUM_KEYS: usize = *SHAPE_NUM_KEYS.last().unwrap();
-const HEXAGON_LAUNCH_DELAY: f32 = 4.;
+const FOE_FONT_SIZE: f32 = 35.;
+const FOE_WORD_BG_CHAR_WIDTH: f32 = 20.;
+const FOE_WORD_BG_PADDING: f32 = 6.;
 const HEXAGON_VIEWPORT_PADDING: f32 = FOE_SIZE * 3.;
 const PENTAGON_SUMMON_WEIGHTS: [f32; 1] = [1.0];
-const PENTAGON_SPAWN_DELAY: f32 = 5.;
 const PROJECTILE_INC_TIME: f32 = 0.1;
 const SUMMONER_COLLISION_PADDING: f32 = PLAYER_RADIUS / 2.;
 const SUMMONER_ORBIT_RADIUS: f32 = PLAYER_RADIUS * 7.;
@@ -97,11 +99,11 @@ const LAUNCH_RECOIL_SPEED: f32 = FOE_SIZE * 1.5;
 const LAUNCHER_ARM_RECOIL_DURATION: f32 = 0.25;
 const LAUNCHER_ARM_RECOIL_MIN_SCALE: f32 = 0.3;
 
-const COMBO_THRESHOLD: usize = 30;
+const COMBO_THRESHOLD: usize = 50;
 const SHOCKWAVE_SPEED: f32 = PLAYER_MOVEMENT_SPEED * 2.;
 const SHOCKWAVE_THICKNESS: f32 = PLAYER_RADIUS / 10.;
 const SHOCKWAVE_OBSTACLE_SPEED: f32 = OBSTACLE_MOVEMENT_SPEED * 8.;
-const SHOCKWAVE_RESOLUTION: u32 = 128;
+const RING_RESOLUTIONS: u32 = 128;
 
 const TRIANGLE_CENTERING_OFFSET_Y: f32 = FOE_SIZE / 3.;
 const TRIANGLE_LOCAL_POINTS: [Vec3; 3] = [
@@ -155,11 +157,17 @@ const PLAYER_LOCAL_TRIANGLE: [Vec3; 3] = [
     Vec3::new(-PLAYER_RADIUS / 2., PLAYER_RADIUS, 0.),
 ];
 
+const WORD_LIST_LEN: usize = 2000;
+static WORD_LIST_3: [&str; WORD_LIST_LEN] = include!("../assets/words_3.rs");
+static WORD_LIST_4: [&str; WORD_LIST_LEN] = include!("../assets/words_4.rs");
+static WORD_LIST_5: [&str; WORD_LIST_LEN] = include!("../assets/words_5.rs");
+static WORD_LIST_6: [&str; WORD_LIST_LEN] = include!("../assets/words_6.rs");
+
 fn spawner_foe_delay_mu(x: f32, max_dif: bool) -> f32 {
     if MIN_DELAY {
         SPAWN_DELTA
     } else {
-        5. * f32::exp(-0.12 * if max_dif { f32::MAX } else { x }) + 0.5
+        2. * f32::exp(-0.06 * if max_dif { f32::MAX } else { x }) + 1.
     }
 }
 
@@ -209,21 +217,20 @@ mod colors {
     const PURPLE: Color = Color::srgb_u8(189, 147, 249);
     const PINK: Color = Color::srgb_u8(255, 121, 198);
     pub const ORANGE: Color = Color::srgb_u8(255, 184, 108);
-    pub const TYPING_INDICATOR: Color = CYAN;
     const RED: Color = Color::srgb_u8(255, 85, 85);
 
     pub const BASE: Color = BACKGROUND;
     pub const SHAPE_COLORS: [Color; 4] = [RED, PINK, PURPLE, ORANGE];
     pub const INDICATOR: Color = YELLOW;
-    pub const PROJECTILE: Color = FOREGROUND;
+    pub const ACTIVE_NOTCH: Color = CYAN;
+    pub const PROJECTILE: Color = CYAN;
     pub const GLOW: Color = CYAN;
-    pub const LAUNCHER_NOTCH: Color = CYAN;
-    pub const OBSTACLE: Color = CYAN;
+    pub const OBSTACLE: Color = GREEN;
     pub const PLAYER: Color = FOREGROUND;
     pub const LAUNCHER: Color = SELECTION;
-    pub const TEXT_NEXT: Color = GREEN;
+    pub const TEXT_NEXT: Color = CYAN;
     pub const TEXT_DONE: Color = BACKGROUND;
-    pub const TEXT_FUTURE: Color = COMMENT;
+    pub const TEXT_FUTURE: Color = FOREGROUND;
     pub const LABEL: Color = FOREGROUND;
     pub const BUTTON_TEXT: Color = PURPLE;
     pub const IN_GAME_MENU: Color = match SELECTION {
@@ -240,16 +247,14 @@ mod colors {
         _ => unreachable!(),
     };
     pub const EXPLOSION: [Color; 2] = [ORANGE, RED];
+    pub const FOE_WORD_BG: Color = match BACKGROUND {
+        Color::Srgba(x) => Color::Srgba(Srgba { alpha: 0.75, ..x }),
+        _ => unreachable!(),
+    };
 }
 
 const PRESS_REPEAT_DELAY: f32 = 0.4;
 const PRESS_REPEAT_INTERVAL: f32 = 0.1;
-
-const LEN_KEY_POOL: usize = 26;
-const KEY_POOL: [char; LEN_KEY_POOL] = [
-    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',
-    't', 'u', 'v', 'w', 'x', 'y', 'z',
-];
 
 const QWERTY_MOVEMENT: [(KeyCode, char); 4] = [
     (KeyCode::KeyD, 'd'),
@@ -710,6 +715,12 @@ struct PlayerLauncher;
 struct EngineGlow;
 
 #[derive(Component)]
+struct LauncherNotch;
+
+#[derive(Component)]
+struct LocalPoint;
+
+#[derive(Component)]
 struct Slowdown {
     time: f32,
 }
@@ -748,7 +759,7 @@ pub fn text_font() -> TextFont {
 }
 
 pub fn foe_font() -> TextFont {
-    TextFont::default().with_font_size(35.)
+    TextFont::default().with_font_size(FOE_FONT_SIZE)
 }
 
 pub fn small_font() -> TextFont {
@@ -776,6 +787,21 @@ impl AudioMsg {
             AudioMsg::FoeLaunch => sounds.foe_launch.clone(),
         }
     }
+}
+
+pub fn random_word(length: usize) -> [char; FOE_MAX_NUM_KEYS] {
+    let list: &[&str] = match length {
+        3 => &WORD_LIST_3,
+        4 => &WORD_LIST_4,
+        5 => &WORD_LIST_5,
+        _ => &WORD_LIST_6,
+    };
+    let word = list[rand::random_range(0..list.len())];
+    let mut keys = [' '; FOE_MAX_NUM_KEYS];
+    for (i, ch) in word.chars().enumerate().take(FOE_MAX_NUM_KEYS) {
+        keys[i] = ch;
+    }
+    keys
 }
 
 #[derive(Component)]

@@ -20,6 +20,5 @@ getrandom = { version = "0.4.2", features = ["wasm_js"] }
 [features]
 invincible = []
 show_local_points = []
-one_key = []
 min_delay = []
 speedup = []
