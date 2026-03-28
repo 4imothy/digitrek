@@ -87,6 +87,8 @@ const FOE_FONT_SIZE: f32 = 35.;
 const FOE_WORD_BG_CHAR_WIDTH: f32 = 20.;
 const FOE_WORD_BG_PADDING: f32 = 6.;
 const HEXAGON_VIEWPORT_PADDING: f32 = FOE_SIZE * 3.;
+const FOE_AVOID_COUNT: usize = 10;
+const WORD_AVOID_RETRIES: usize = 10;
 const PENTAGON_SUMMON_WEIGHTS: [f32; 1] = [1.0];
 const PROJECTILE_INC_TIME: f32 = 0.1;
 const SUMMONER_COLLISION_PADDING: f32 = PLAYER_RADIUS / 2.;
@@ -787,21 +789,6 @@ impl AudioMsg {
             AudioMsg::FoeLaunch => sounds.foe_launch.clone(),
         }
     }
-}
-
-pub fn random_word(length: usize) -> [char; FOE_MAX_NUM_KEYS] {
-    let list: &[&str] = match length {
-        3 => &WORD_LIST_3,
-        4 => &WORD_LIST_4,
-        5 => &WORD_LIST_5,
-        _ => &WORD_LIST_6,
-    };
-    let word = list[rand::random_range(0..list.len())];
-    let mut keys = [' '; FOE_MAX_NUM_KEYS];
-    for (i, ch) in word.chars().enumerate().take(FOE_MAX_NUM_KEYS) {
-        keys[i] = ch;
-    }
-    keys
 }
 
 #[derive(Component)]

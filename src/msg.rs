@@ -35,7 +35,8 @@ pub fn on_msg(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut msg: MessageReader<GameMsg>,
-    enemies: Query<&Foe, Without<ToDespawn>>,
+    enemies: Query<(&Foe, &Transform), Without<ToDespawn>>,
+    player: Single<&Transform, With<Player>>,
     children_query: Query<&Children>,
     enemy_text_query: Query<(), With<EnemyText>>,
     local_point_query: Query<(), With<LocalPoint>>,
@@ -101,7 +102,7 @@ pub fn on_msg(
             }
             GameMsg::AddText(entity) => {
                 let mut cmd = commands.entity(*entity);
-                if let Ok(enemy) = enemies.get(*entity)
+                if let Ok((enemy, _)) = enemies.get(*entity)
                     && !enemy.keys.is_empty()
                 {
                     add_text(
@@ -117,6 +118,28 @@ pub fn on_msg(
             }
             GameMsg::SpawnFoe(shape, pos, spawned_by, rot) => {
                 if !inside_shockwave(*pos, &shockwaves) {
+                    let player_pos = player.translation.xy();
+                    let mut closest = [(f32::MAX, ' '); FOE_AVOID_COUNT];
+                    let mut count = 0;
+                    for (f, t) in enemies.iter() {
+                        if let Some(key) = f.keys.get(f.next_index).copied().filter(|c| *c != ' ') {
+                            let dist = t.translation.xy().distance(player_pos);
+                            let pos = closest[..count].partition_point(|(d, _)| *d < dist);
+                            if pos < FOE_AVOID_COUNT {
+                                let end = count.min(FOE_AVOID_COUNT - 1);
+                                closest.copy_within(pos..end, pos + 1);
+                                closest[pos] = (dist, key);
+                                if count < FOE_AVOID_COUNT {
+                                    count += 1;
+                                }
+                            }
+                        }
+                    }
+                    let mut avoid = [' '; FOE_AVOID_COUNT];
+                    for i in 0..count {
+                        avoid[i] = closest[i].1;
+                    }
+                    let avoid = &avoid[..count];
                     spawn_foe(
                         &mut commands,
                         &mut meshes,
@@ -127,6 +150,7 @@ pub fn on_msg(
                         *spawned_by,
                         viewport_width,
                         &shape_assets,
+                        avoid,
                     );
                 }
             }
@@ -360,6 +384,31 @@ fn countdown_outline_mesh(sides: usize, radius: f32, thickness: f32) -> Mesh {
     mesh
 }
 
+fn word_to_keys(word: &str) -> [char; FOE_MAX_NUM_KEYS] {
+    let mut keys = [' '; FOE_MAX_NUM_KEYS];
+    for (i, ch) in word.chars().enumerate().take(FOE_MAX_NUM_KEYS) {
+        keys[i] = ch;
+    }
+    keys
+}
+
+fn random_word_avoiding(length: usize, avoid_first: &[char]) -> [char; FOE_MAX_NUM_KEYS] {
+    let list: &[&str] = match length {
+        3 => &WORD_LIST_3,
+        4 => &WORD_LIST_4,
+        5 => &WORD_LIST_5,
+        6 => &WORD_LIST_6,
+        _ => unreachable!(),
+    };
+    let pick = || list[rand::random_range(0..list.len())];
+    word_to_keys(
+        (0..WORD_AVOID_RETRIES)
+            .map(|_| pick())
+            .find(|w| w.chars().next().is_some_and(|c| !avoid_first.contains(&c)))
+            .unwrap_or_else(pick),
+    )
+}
+
 fn spawn_foe(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -370,6 +419,7 @@ fn spawn_foe(
     spawned_by: Option<Entity>,
     viewport_width: f32,
     shape_assets: &ShapeAssets,
+    avoid_first: &[char],
 ) {
     let num_keys = SHAPE_NUM_KEYS[shape.id()];
     let mesh = shape_assets.meshes[shape.id()].clone();
@@ -380,7 +430,7 @@ fn spawn_foe(
         Shape::Hexagon => HEXAGON_Z_INDEX,
     };
 
-    let keys = random_word(num_keys);
+    let keys = random_word_avoiding(num_keys, avoid_first);
 
     let mut ent_cmds = commands.spawn((
         Mesh2d(mesh),
