@@ -45,7 +45,6 @@ pub fn on_msg(
     mut pkv: ResMut<PkvStore>,
     window: Single<&Window>,
     shape_assets: Res<ShapeAssets>,
-    shockwaves: Query<(&Shockwave, &Transform)>,
 ) {
     let viewport_width = window.width() * VIEWPORT_HEIGHT / window.height();
     for msg in msg.read() {
@@ -103,69 +102,65 @@ pub fn on_msg(
             GameMsg::AddText(entity) => {
                 let mut cmd = commands.entity(*entity);
                 if let Ok((enemy, _)) = enemies.get(*entity)
-                    && !enemy.keys.is_empty()
+                    && enemy.keys_not_hit() > 0
                 {
                     add_text(
                         &mut cmd,
                         &mut meshes,
                         &mut materials,
                         &enemy.keys,
-                        enemy.orig_len.saturating_sub(enemy.cleared + enemy.skipped),
+                        enemy.keys_not_hit(),
                         enemy.cleared,
                         enemy.next_index,
                     );
                 }
             }
             GameMsg::SpawnFoe(shape, pos, spawned_by, rot) => {
-                if !inside_shockwave(*pos, &shockwaves) {
-                    let player_pos = player.translation.xy();
-                    let mut closest = [(f32::MAX, ' '); FOE_AVOID_COUNT];
-                    let mut count = 0;
-                    for (f, t) in enemies.iter() {
-                        if let Some(key) = f.keys.get(f.next_index).copied().filter(|c| *c != ' ') {
-                            let dist = t.translation.xy().distance(player_pos);
-                            let pos = closest[..count].partition_point(|(d, _)| *d < dist);
-                            if pos < FOE_AVOID_COUNT {
-                                let end = count.min(FOE_AVOID_COUNT - 1);
-                                closest.copy_within(pos..end, pos + 1);
-                                closest[pos] = (dist, key);
-                                if count < FOE_AVOID_COUNT {
-                                    count += 1;
-                                }
+                let player_pos = player.translation.xy();
+                let mut closest = [(f32::MAX, ' '); FOE_AVOID_COUNT];
+                let mut count = 0;
+                for (f, t) in enemies.iter() {
+                    if let Some(key) = f.keys.get(f.next_index).copied().filter(|c| *c != ' ') {
+                        let dist = t.translation.xy().distance(player_pos);
+                        let pos = closest[..count].partition_point(|(d, _)| *d < dist);
+                        if pos < FOE_AVOID_COUNT {
+                            let end = count.min(FOE_AVOID_COUNT - 1);
+                            closest.copy_within(pos..end, pos + 1);
+                            closest[pos] = (dist, key);
+                            if count < FOE_AVOID_COUNT {
+                                count += 1;
                             }
                         }
                     }
-                    let mut avoid = [' '; FOE_AVOID_COUNT];
-                    for i in 0..count {
-                        avoid[i] = closest[i].1;
-                    }
-                    let avoid = &avoid[..count];
-                    spawn_foe(
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        *shape,
-                        *pos,
-                        *rot,
-                        *spawned_by,
-                        viewport_width,
-                        &shape_assets,
-                        avoid,
-                    );
                 }
+                let mut avoid = [' '; FOE_AVOID_COUNT];
+                for i in 0..count {
+                    avoid[i] = closest[i].1;
+                }
+                let avoid = &avoid[..count];
+                spawn_foe(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    *shape,
+                    *pos,
+                    *rot,
+                    *spawned_by,
+                    viewport_width,
+                    &shape_assets,
+                    avoid,
+                );
             }
             GameMsg::SpawnObstacle(pos, direction) => {
-                if !inside_shockwave(*pos, &shockwaves) {
-                    commands.spawn((
-                        Obstacle {
-                            velocity: *direction * OBSTACLE_MOVEMENT_SPEED,
-                            colliding: false,
-                        },
-                        Mesh2d(meshes.add(Circle::new(OBSTACLE_RADIUS))),
-                        MeshMaterial2d(materials.add(colors::OBSTACLE)),
-                        Transform::from_translation(pos.extend(OBSTACLE_Z_INDEX)),
-                    ));
-                }
+                commands.spawn((
+                    Obstacle {
+                        velocity: *direction * OBSTACLE_MOVEMENT_SPEED,
+                        colliding: false,
+                    },
+                    Mesh2d(meshes.add(Circle::new(OBSTACLE_RADIUS))),
+                    MeshMaterial2d(materials.add(colors::OBSTACLE)),
+                    Transform::from_translation(pos.extend(OBSTACLE_Z_INDEX)),
+                ));
             }
             GameMsg::Invisible(entity) => {
                 commands.entity(*entity).insert(Visibility::Hidden);
@@ -195,36 +190,8 @@ pub fn on_msg(
                     time: GAME_OVER_SLOWDOWN_REAL_TIME,
                 });
             }
-            GameMsg::TriggerShockwave(pos) => {
-                let mat = materials.add(colors::GLOW.with_alpha(0.85));
-                commands.spawn((
-                    Shockwave {
-                        radius: PLAYER_RING_RADIUS,
-                        material: mat.clone(),
-                    },
-                    Mesh2d(
-                        meshes.add(
-                            Annulus::new(
-                                (PLAYER_RING_RADIUS - SHOCKWAVE_THICKNESS / 2.).max(0.),
-                                PLAYER_RING_RADIUS + SHOCKWAVE_THICKNESS / 2.,
-                            )
-                            .mesh()
-                            .resolution(RING_RESOLUTIONS)
-                            .build(),
-                        ),
-                    ),
-                    MeshMaterial2d(mat),
-                    Transform::from_translation(pos.extend(SHOCKWAVE_Z_INDEX)),
-                ));
-            }
         }
     }
-}
-
-fn inside_shockwave(pos: Vec2, shockwaves: &Query<(&Shockwave, &Transform)>) -> bool {
-    shockwaves
-        .iter()
-        .any(|(sw, t)| pos.distance(t.translation.xy()) < sw.radius + SHOCKWAVE_THICKNESS / 2.)
 }
 
 fn spawn_explosion(

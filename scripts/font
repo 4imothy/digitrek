@@ -9,7 +9,7 @@ base = fontforge.open(os.path.join(script_dir, "SpaceGrotesk-Bold.ttf"))
 for lookup in base.gsub_lookups:
     base.removeLookup(lookup)
 
-allowed = set("abcdefghijklmnopqrstuvwxyz0123456789:. ")
+allowed = set("abcdefghijklmnopqrstuvwxyz0123456789:., ")
 to_remove = [
     g.glyphname
     for g in base.glyphs()

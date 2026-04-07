@@ -8,7 +8,14 @@ mod game;
 mod menu;
 mod msg;
 
-use bevy::{asset::RenderAssetUsages, input::common_conditions::input_just_pressed, prelude::*};
+use bevy::{
+    asset::{embedded_asset, RenderAssetUsages},
+    input::common_conditions::input_just_pressed,
+    prelude::*,
+    render::render_resource::AsBindGroup,
+    shader::ShaderRef,
+    sprite_render::{AlphaMode2d, Material2d, Material2dPlugin},
+};
 use bevy_pkv::PkvStore;
 use rand::distr::weighted::WeightedIndex;
 use serde::{Deserialize, Serialize};
@@ -101,11 +108,13 @@ const LAUNCH_RECOIL_SPEED: f32 = FOE_SIZE * 1.5;
 const LAUNCHER_ARM_RECOIL_DURATION: f32 = 0.25;
 const LAUNCHER_ARM_RECOIL_MIN_SCALE: f32 = 0.3;
 
-const COMBO_THRESHOLD: usize = 50;
-const SHOCKWAVE_SPEED: f32 = PLAYER_MOVEMENT_SPEED * 2.;
-const SHOCKWAVE_THICKNESS: f32 = PLAYER_RADIUS / 10.;
-const SHOCKWAVE_OBSTACLE_SPEED: f32 = OBSTACLE_MOVEMENT_SPEED * 8.;
 const RING_RESOLUTIONS: u32 = 128;
+
+const FUEL_DRAIN_RATE: f32 = 0.45;
+const FUEL_PER_KEY: f32 = 0.02;
+const FUEL_PASSIVE_RATE: f32 = 0.02;
+
+const STAR_Z_INDEX: f32 = -1.;
 
 const TRIANGLE_CENTERING_OFFSET_Y: f32 = FOE_SIZE / 3.;
 const TRIANGLE_LOCAL_POINTS: [Vec3; 3] = [
@@ -187,7 +196,6 @@ const OBSTACLE_Z_INDEX: f32 = 1.;
 const TRACKING_Z_INDEX: f32 = 2.;
 const SUMMONER_Z_INDEX: f32 = 3.;
 const HEXAGON_Z_INDEX: f32 = 4.;
-const SHOCKWAVE_Z_INDEX: f32 = 5.;
 const PLAYER_Z_INDEX: f32 = 6.;
 const INDICATOR_Z_INDEX: f32 = 7.;
 const VIEWPORT_HEIGHT: f32 = 1000.;
@@ -210,7 +218,7 @@ mod colors {
 
     // https://draculatheme.com/spec
     const BACKGROUND: Color = Color::srgb_u8(40, 42, 54);
-    const SELECTION: Color = Color::srgb_u8(68, 71, 90);
+    pub const SELECTION: Color = Color::srgb_u8(68, 71, 90);
     const COMMENT: Color = Color::srgb_u8(98, 114, 164);
     const FOREGROUND: Color = Color::srgb_u8(248, 248, 242);
     const GREEN: Color = Color::srgb_u8(80, 250, 123);
@@ -235,8 +243,9 @@ mod colors {
     pub const TEXT_FUTURE: Color = FOREGROUND;
     pub const LABEL: Color = FOREGROUND;
     pub const BUTTON_TEXT: Color = PURPLE;
+    const ALPHA: f32 = 0.7;
     pub const IN_GAME_MENU: Color = match SELECTION {
-        Color::Srgba(x) => Color::Srgba(Srgba { alpha: 0.7, ..x }),
+        Color::Srgba(x) => Color::Srgba(Srgba { alpha: ALPHA, ..x }),
         _ => unreachable!(),
     };
     pub const SELECTED_OUTLINE: Color = FOREGROUND;
@@ -245,12 +254,18 @@ mod colors {
     pub const TITLE_CHARS: [Color; env!("CARGO_PKG_NAME").len()] =
         [GREEN, PINK, ORANGE, PINK, YELLOW, PURPLE, CYAN, RED];
     pub const OUTLINE_MESH: Color = match COMMENT {
-        Color::Srgba(x) => Color::Srgba(Srgba { alpha: 0.7, ..x }),
+        Color::Srgba(x) => Color::Srgba(Srgba { alpha: ALPHA, ..x }),
         _ => unreachable!(),
     };
+    pub const STAR: Color = match COMMENT {
+        Color::Srgba(x) => Color::Srgba(Srgba { alpha: 0.4, ..x }),
+        _ => unreachable!(),
+    };
+    pub const DUST_A: Color = PURPLE;
+    pub const DUST_B: Color = CYAN;
     pub const EXPLOSION: [Color; 2] = [ORANGE, RED];
     pub const FOE_WORD_BG: Color = match BACKGROUND {
-        Color::Srgba(x) => Color::Srgba(Srgba { alpha: 0.75, ..x }),
+        Color::Srgba(x) => Color::Srgba(Srgba { alpha: ALPHA, ..x }),
         _ => unreachable!(),
     };
 }
@@ -306,7 +321,7 @@ impl Config {
         config
     }
 
-    fn dir(&self, idx: usize) -> (KeyCode, char) {
+    fn layout_key(&self, idx: usize) -> (KeyCode, char) {
         let m = match self.physical_keyboard_layout {
             KeyboardLayouts::Qwerty => QWERTY_MOVEMENT,
             KeyboardLayouts::Dvorak => DVORAK_MOVEMENT,
@@ -315,28 +330,41 @@ impl Config {
         m[idx]
     }
     pub fn right(&self) -> KeyCode {
-        self.dir(0).0
+        self.layout_key(0).0
     }
     pub fn right_char(&self) -> char {
-        self.dir(0).1
+        self.layout_key(0).1
     }
     pub fn left(&self) -> KeyCode {
-        self.dir(1).0
+        self.layout_key(1).0
     }
     pub fn left_char(&self) -> char {
-        self.dir(1).1
+        self.layout_key(1).1
     }
     pub fn up(&self) -> KeyCode {
-        self.dir(2).0
+        self.layout_key(2).0
     }
     pub fn up_char(&self) -> char {
-        self.dir(2).1
+        self.layout_key(2).1
     }
     pub fn down(&self) -> KeyCode {
-        self.dir(3).0
+        self.layout_key(3).0
+    }
+    fn deselect_key(&self) -> (KeyCode, char) {
+        match self.physical_keyboard_layout {
+            KeyboardLayouts::Qwerty => (KeyCode::KeyK, 'k'),
+            KeyboardLayouts::Dvorak => (KeyCode::KeyT, 't'),
+            KeyboardLayouts::Colemak => (KeyCode::KeyE, 'e'),
+        }
+    }
+    pub fn deselect(&self) -> KeyCode {
+        self.deselect_key().0
+    }
+    pub fn deselect_char(&self) -> char {
+        self.deselect_key().1
     }
     pub fn down_char(&self) -> char {
-        self.dir(3).1
+        self.layout_key(3).1
     }
 }
 
@@ -349,8 +377,8 @@ enum KeyboardLayouts {
 
 fn main() {
     let mut pkv = PkvStore::new("timware", env!("CARGO_PKG_NAME"));
-    App::new()
-        .add_plugins((
+    let mut app = App::new();
+    app.add_plugins((
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
                     title: env!("CARGO_PKG_NAME").to_string(),
@@ -358,6 +386,7 @@ fn main() {
                 }),
                 ..default()
             }),
+            Material2dPlugin::<StarfieldMaterial>::default(),
             menu_plugin,
             game_plugin,
         ))
@@ -366,8 +395,9 @@ fn main() {
         .init_state::<Screen>()
         .insert_resource(Config::load(&mut pkv))
         .insert_resource(ClearColor(colors::BASE))
-        .insert_resource(pkv)
-        .run();
+        .insert_resource(pkv);
+    embedded_asset!(app, "starfield.wgsl");
+    app.run();
 }
 
 fn load_or_set<T: serde::de::DeserializeOwned + serde::Serialize>(
@@ -387,6 +417,8 @@ fn setup(
     mut config: ResMut<Config>,
     mut global_volume: ResMut<GlobalVolume>,
     mut fonts: ResMut<Assets<Font>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut star_materials: ResMut<Assets<StarfieldMaterial>>,
 ) {
     let font = Font::try_from_bytes(include_bytes!("../assets/font.ttf").to_vec()).unwrap();
     let _ = fonts.insert(Handle::<Font>::default().id(), font);
@@ -398,9 +430,27 @@ fn setup(
             },
             ..OrthographicProjection::default_2d()
         }),
+        Transform::from_xyz(0., PLAYER_RADIUS, 0.),
     ));
     let vol = config.volume;
     config.set_vol(vol, &mut global_volume);
+    let star = LinearRgba::from(colors::STAR);
+    let bg = LinearRgba::from(colors::BASE);
+    let da = LinearRgba::from(colors::DUST_A);
+    let db = LinearRgba::from(colors::DUST_B);
+    let mat = star_materials.add(StarfieldMaterial {
+        seed: UVec4::new(rand::random::<u32>(), 0, 0, 0),
+        color: Vec4::new(star.red, star.green, star.blue, star.alpha),
+        bg: Vec4::new(bg.red, bg.green, bg.blue, 0.0),
+        dust_a: Vec4::new(da.red, da.green, da.blue, 0.0),
+        dust_b: Vec4::new(db.red, db.green, db.blue, 0.0),
+    });
+    commands.spawn((
+        StarQuad,
+        Mesh2d(meshes.add(Rectangle::new(1., 1.))),
+        MeshMaterial2d(mat),
+        Transform::from_xyz(0., PLAYER_RADIUS, STAR_Z_INDEX),
+    ));
 }
 
 fn menu_plugin(app: &mut App) {
@@ -483,7 +533,6 @@ fn game_plugin(app: &mut App) {
         despawn::<Indicator>,
         despawn::<Slowdown>,
         despawn::<Stats>,
-        despawn::<Shockwave>,
     );
     app.insert_resource(Mode::default())
         .add_systems(OnEnter(Screen::Game), game::setup)
@@ -533,6 +582,7 @@ fn game_plugin(app: &mut App) {
         .add_systems(
             Update,
             (
+                game::camera_follow,
                 game::player_movement,
                 game::keypress,
                 game::slowdown_time,
@@ -546,11 +596,12 @@ fn game_plugin(app: &mut App) {
                 game::obstacle,
                 game::explosion_system,
                 game::update_countdown_indicators,
-                game::shockwave_system,
                 game::update_launcher_ring,
+                game::fuel_charge,
             )
                 .run_if(in_state(Screen::Game)),
         )
+        .add_systems(Update, game::update_stars)
         .add_systems(
             Update,
             menu::resume_countdown.run_if(in_state(GameScreen::ResumeCountdown)),
@@ -645,7 +696,6 @@ enum GameMsg {
     DeSelect(Entity),
     Projectile(Entity, Vec3),
     GameEnd,
-    TriggerShockwave(Vec2),
 }
 
 #[derive(Message)]
@@ -728,12 +778,6 @@ struct Slowdown {
 }
 
 #[derive(Component)]
-struct Shockwave {
-    radius: f32,
-    material: Handle<ColorMaterial>,
-}
-
-#[derive(Component)]
 struct LauncherRing;
 
 #[derive(Component)]
@@ -746,7 +790,6 @@ struct Obstacle {
 struct AudioAssets {
     pub unmatched_keypress: Handle<AudioSource>,
     pub explosion: Handle<AudioSource>,
-    pub shockwave: Handle<AudioSource>,
     pub foe_launch: Handle<AudioSource>,
 }
 
@@ -776,7 +819,6 @@ pub fn title_font() -> TextFont {
 pub enum AudioMsg {
     Explosion,
     UnmatchedKeypress,
-    Shockwave,
     FoeLaunch,
 }
 
@@ -785,7 +827,6 @@ impl AudioMsg {
         match self {
             AudioMsg::Explosion => sounds.explosion.clone(),
             AudioMsg::UnmatchedKeypress => sounds.unmatched_keypress.clone(),
-            AudioMsg::Shockwave => sounds.shockwave.clone(),
             AudioMsg::FoeLaunch => sounds.foe_launch.clone(),
         }
     }
@@ -946,11 +987,37 @@ pub struct Active;
 #[derive(Component)]
 pub struct KeyboardOption;
 
+#[derive(Component)]
+pub struct StarQuad;
+
+#[derive(Asset, TypePath, AsBindGroup, Clone)]
+struct StarfieldMaterial {
+    #[uniform(0)]
+    seed: UVec4,
+    #[uniform(1)]
+    color: Vec4,
+    #[uniform(2)]
+    bg: Vec4,
+    #[uniform(3)]
+    dust_a: Vec4,
+    #[uniform(4)]
+    dust_b: Vec4,
+}
+
+impl Material2d for StarfieldMaterial {
+    fn fragment_shader() -> ShaderRef {
+        concat!("embedded://", env!("CARGO_PKG_NAME"), "/starfield.wgsl").into()
+    }
+    fn alpha_mode(&self) -> AlphaMode2d {
+        AlphaMode2d::Opaque
+    }
+}
+
 #[derive(Resource)]
 struct Clock(f32);
 
 #[derive(Resource)]
-struct Combo(usize);
+pub struct Fuel(pub f32);
 
 fn toggle_pause(mut msg: MessageWriter<PauseMsg>) {
     msg.write(PauseMsg::TogglePause);

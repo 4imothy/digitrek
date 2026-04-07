@@ -152,7 +152,7 @@ pub fn setup(
             running: true,
         },
     ));
-    commands.insert_resource(Combo(0));
+    commands.insert_resource(Fuel(0.));
     commands.insert_resource(Spawner {
         foe_dist: WeightedIndex::new(PHASE_WEIGHTS[0]).unwrap(),
         foe_delay: FIRST_FOE_SPAWN_DELAY,
@@ -165,9 +165,6 @@ pub fn setup(
         }),
         explosion: audio.add(AudioSource {
             bytes: Arc::from(*include_bytes!("../assets/boom.ogg")),
-        }),
-        shockwave: audio.add(AudioSource {
-            bytes: Arc::from(*include_bytes!("../assets/wave.ogg")),
         }),
         foe_launch: audio.add(AudioSource {
             bytes: Arc::from(*include_bytes!("../assets/launch.ogg")),
@@ -185,8 +182,13 @@ pub fn setup(
     commands.insert_resource(Clock(0.));
 }
 
-pub fn default_state(mut next_screen: ResMut<NextState<GameScreen>>) {
-    next_screen.set(GameScreen::default())
+pub fn default_state(
+    mut next_screen: ResMut<NextState<GameScreen>>,
+    mut camera: Single<&mut Transform, With<Camera2d>>,
+) {
+    next_screen.set(GameScreen::default());
+    camera.translation.x = 0.;
+    camera.translation.y = PLAYER_RADIUS;
 }
 
 impl Shape {
@@ -234,10 +236,11 @@ pub fn foe_points(query: Query<(Entity, &Foe, &Transform)>, mut cache: ResMut<Fo
 fn explosion_in_viewport(
     pos: Vec3,
     viewport_width: f32,
+    center: Vec2,
     msg: &mut MessageWriter<GameMsg>,
     audio: &mut MessageWriter<AudioMsg>,
 ) {
-    if in_viewport(pos, viewport_width, Vec2::ZERO) {
+    if in_viewport(pos, viewport_width, Vec2::ZERO, center) {
         msg.write(GameMsg::Explosion(pos.xy()));
         audio.write(AudioMsg::Explosion);
     }
@@ -256,13 +259,14 @@ impl Foe {
         pos: Vec3,
         normal: Vec2,
         viewport_width: f32,
+        center: Vec2,
     ) {
         self.colliding = true;
         if let Some(shape) = self.shape.downgraded_shape() {
             self.shape = shape;
             self.skipped += 1;
             if self.cleared + self.skipped >= self.orig_len {
-                explosion_in_viewport(pos, viewport_width, msg, audio);
+                explosion_in_viewport(pos, viewport_width, center, msg, audio);
                 msg.write(GameMsg::Despawn(entity));
             } else {
                 self.add_collision(normal);
@@ -278,7 +282,7 @@ impl Foe {
                 msg.write(GameMsg::AddText(entity));
             }
         } else {
-            explosion_in_viewport(pos, viewport_width, msg, audio);
+            explosion_in_viewport(pos, viewport_width, center, msg, audio);
             msg.write(GameMsg::Despawn(entity));
         }
     }
@@ -293,6 +297,14 @@ impl Foe {
 
     pub fn num_points(&self) -> usize {
         self.shape.id() + 3
+    }
+
+    pub fn keys_to_type(&self) -> usize {
+        self.orig_len.saturating_sub(self.next_index + self.skipped)
+    }
+
+    pub fn keys_not_hit(&self) -> usize {
+        self.orig_len.saturating_sub(self.cleared + self.skipped)
     }
 }
 
@@ -347,7 +359,8 @@ pub fn keypress(
     time: ResMut<Time<Virtual>>,
     stats: Single<&mut Stats>,
     mut mode: ResMut<Mode>,
-    mut combo: ResMut<Combo>,
+    mut fuel: ResMut<Fuel>,
+    config: Res<Config>,
 ) {
     let (mut player, player_transform) = player.into_inner();
     if !stats.running {
@@ -362,6 +375,14 @@ pub fn keypress(
             continue;
         }
         if time.is_paused() {
+            continue;
+        }
+        if key.key_code == config.deselect() && *mode == Mode::Movement {
+            msg.write(GameMsg::Invisible(*indicator));
+            if let Some(selected) = player.selected {
+                msg.write(GameMsg::DeSelect(selected));
+            }
+            player.selected = None;
             continue;
         }
         match &key.logical_key {
@@ -385,13 +406,6 @@ pub fn keypress(
                 }
                 player.selected = None;
             }
-            Key::Character(str) if str.as_str() == "." => {
-                msg.write(GameMsg::Invisible(*indicator));
-                if let Some(selected) = player.selected {
-                    msg.write(GameMsg::DeSelect(selected));
-                }
-                player.selected = None;
-            }
             Key::Character(str) if *mode == Mode::Typing => {
                 if let Some(key) = str.chars().next().map(|c| c.to_ascii_lowercase()) {
                     if let Some(selected) = player.selected
@@ -400,17 +414,13 @@ pub fn keypress(
                     {
                         found_selected = true;
                         if key == selected_enemy.keys[selected_enemy.next_index] {
-                            advance_combo(&mut combo, player_transform, &mut msg, &mut audio);
+                            fuel.0 = (fuel.0 + FUEL_PER_KEY).min(1.);
                             selected_enemy.next_index += 1;
                             msg.write(GameMsg::Projectile(
                                 selected_entity,
                                 projectile_spawn_location(player_transform, &launcher_transform),
                             ));
-                            if selected_enemy
-                                .orig_len
-                                .saturating_sub(selected_enemy.next_index + selected_enemy.skipped)
-                                == 0
-                            {
+                            if selected_enemy.keys_to_type() == 0 {
                                 msg.write(GameMsg::Invisible(*indicator));
                                 msg.write(GameMsg::DeSelect(selected));
                                 player.selected = None;
@@ -418,7 +428,6 @@ pub fn keypress(
                             msg.write(GameMsg::DespawnText(selected_entity));
                             msg.write(GameMsg::AddText(selected_entity));
                         } else {
-                            combo.0 = 0;
                             audio.write(AudioMsg::UnmatchedKeypress);
                         }
                     }
@@ -448,7 +457,7 @@ pub fn keypress(
 
                         if let Some(e) = closest_entity {
                             let mut ce = closest_enemy.unwrap();
-                            if ce.orig_len.saturating_sub(ce.next_index + ce.skipped) > 1 {
+                            if ce.keys_to_type() > 1 {
                                 player.selected = closest_entity;
                                 msg.write(GameMsg::Select(e));
                             } else {
@@ -459,7 +468,7 @@ pub fn keypress(
                                 );
                             }
 
-                            advance_combo(&mut combo, player_transform, &mut msg, &mut audio);
+                            fuel.0 = (fuel.0 + FUEL_PER_KEY).min(1.);
                             ce.next_index += 1;
                             msg.write(GameMsg::DespawnText(e));
                             msg.write(GameMsg::AddText(e));
@@ -468,7 +477,6 @@ pub fn keypress(
                                 projectile_spawn_location(player_transform, &launcher_transform),
                             ));
                         } else {
-                            combo.0 = 0;
                             audio.write(AudioMsg::UnmatchedKeypress);
                         }
                         if player.selected.is_none() {
@@ -479,24 +487,6 @@ pub fn keypress(
             }
             _ => {}
         }
-    }
-}
-
-fn advance_combo(
-    combo: &mut Combo,
-    player_transform: &Transform,
-    msg: &mut MessageWriter<GameMsg>,
-    audio: &mut MessageWriter<AudioMsg>,
-) {
-    combo.0 += 1;
-    if combo.0 >= COMBO_THRESHOLD {
-        msg.write(GameMsg::TriggerShockwave(
-            player_transform
-                .transform_point(Vec3::new(0., PLAYER_RADIUS / 2., 0.))
-                .xy(),
-        ));
-        audio.write(AudioMsg::Shockwave);
-        combo.0 = 0;
     }
 }
 
@@ -513,15 +503,17 @@ fn viewport_width(win: &Window) -> f32 {
 pub fn player_movement(
     time: Res<Time<Virtual>>,
     key: Res<KeyState>,
+    mut fuel: ResMut<Fuel>,
     mut transform: Single<&mut Transform, With<Player>>,
-    window: Single<&Window>,
     stats: Single<&Stats>,
     mode: Res<Mode>,
     mut glow: Single<&mut Visibility, With<EngineGlow>>,
 ) {
+    let has_fuel = fuel.0 > 0.;
     let moving = stats.running
         && !time.is_paused()
         && *mode == Mode::Movement
+        && has_fuel
         && (key.v.is_some() || key.h.is_some());
     let want = if moving {
         Visibility::Visible
@@ -536,23 +528,16 @@ pub fn player_movement(
         let movement_factor = key.v.map(|v| if v { 1. } else { -1. }).unwrap_or(0.);
 
         let dt = time.delta_secs();
-        let rotation_delta = rotation_factor * PLAYER_ROTATION_SPEED * dt;
+        transform.rotation *= Quat::from_rotation_z(rotation_factor * PLAYER_ROTATION_SPEED * dt);
 
-        let movement_direction = movement_factor * (transform.rotation * Vec3::Y);
-        let movement_distance = PLAYER_MOVEMENT_SPEED * dt;
-        let movement = movement_direction * movement_distance;
-
-        transform.rotation *= Quat::from_rotation_z(rotation_delta);
-
-        let mut translation = transform.translation + movement;
-
-        let half_width = viewport_width(&window) / 2.;
-        let half_height = VIEWPORT_HEIGHT / 2.;
-
-        translation.x = translation.x.clamp(-half_width, half_width);
-        translation.y = translation.y.clamp(-half_height, half_height);
-
-        transform.translation = translation;
+        if has_fuel && movement_factor != 0. {
+            let movement =
+                movement_factor * (transform.rotation * Vec3::Y) * PLAYER_MOVEMENT_SPEED * dt;
+            transform.translation += movement;
+            if !INVINCIBLE {
+                fuel.0 = (fuel.0 - FUEL_DRAIN_RATE * dt).max(0.);
+            }
+        }
     }
 }
 
@@ -617,6 +602,7 @@ pub fn summoner_foe(
 ) {
     let dt = time.delta_secs();
     let viewport_width = viewport_width(&window);
+    let player_pos = player.translation.xy();
 
     for (mut foe, mut sum, mut transform) in &mut query {
         if !foe.entered_viewport
@@ -624,6 +610,7 @@ pub fn summoner_foe(
                 transform.translation,
                 viewport_width,
                 Vec2::splat(-FOE_SIZE),
+                player_pos,
             )
         {
             foe.entered_viewport = true;
@@ -631,7 +618,6 @@ pub fn summoner_foe(
         if foe.knockback.is_some() {
             knockback(&mut foe, &mut transform, dt);
         } else {
-            let player_pos = player.translation.xy();
             let pos = transform.translation.xy();
 
             let rel = pos - player_pos;
@@ -659,9 +645,11 @@ pub fn launcher_foe(
     time: Res<Time<Virtual>>,
     mut query: Query<(&mut Foe, &mut Launcher, &mut Transform)>,
     window: Single<&Window>,
+    player: Single<&Transform, (With<Player>, Without<Launcher>)>,
 ) {
     let dt = time.delta_secs();
     let viewport_width = viewport_width(&window);
+    let player_pos = player.translation.xy();
 
     for (mut foe, mut launcher, mut transform) in &mut query {
         if !foe.entered_viewport
@@ -669,6 +657,7 @@ pub fn launcher_foe(
                 transform.translation,
                 viewport_width,
                 Vec2::splat(-FOE_SIZE),
+                player_pos,
             )
         {
             foe.entered_viewport = true;
@@ -775,11 +764,19 @@ pub fn track_player_for_foe_launcher(
     }
 }
 
-fn in_viewport(pos: Vec3, viewport_width: f32, padding: Vec2) -> bool {
-    pos.x > -viewport_width / 2. + padding.x
-        && pos.x < viewport_width / 2. - padding.x
-        && pos.y > -VIEWPORT_HEIGHT / 2. + padding.y
-        && pos.y < VIEWPORT_HEIGHT / 2. - padding.y
+pub fn camera_follow(
+    player: Single<&Transform, With<Player>>,
+    mut camera: Single<&mut Transform, (With<Camera2d>, Without<Player>)>,
+) {
+    camera.translation.x = player.translation.x;
+    camera.translation.y = player.translation.y;
+}
+
+fn in_viewport(pos: Vec3, viewport_width: f32, padding: Vec2, center: Vec2) -> bool {
+    pos.x > center.x - viewport_width / 2. + padding.x
+        && pos.x < center.x + viewport_width / 2. - padding.x
+        && pos.y > center.y - VIEWPORT_HEIGHT / 2. + padding.y
+        && pos.y < center.y + VIEWPORT_HEIGHT / 2. - padding.y
 }
 
 pub fn tracking_foe(
@@ -797,6 +794,7 @@ pub fn tracking_foe(
                 transform.translation,
                 viewport_width,
                 Vec2::splat(-FOE_SIZE),
+                player_translation,
             )
         {
             foe.entered_viewport = true;
@@ -929,11 +927,7 @@ pub fn projectile(
                     f.since = (f.since - PROJECTILE_INC_TIME).max(0.);
                 }
                 msg.write(GameMsg::Despawn(projectile_entity));
-                if targeted_enemy
-                    .orig_len
-                    .saturating_sub(targeted_enemy.cleared + targeted_enemy.skipped)
-                    <= 1
-                {
+                if targeted_enemy.keys_not_hit() <= 1 {
                     msg.write(GameMsg::Explosion(target_transform.translation.xy()));
                     audio.write(AudioMsg::Explosion);
                     msg.write(GameMsg::Despawn(target_entity));
@@ -1124,15 +1118,17 @@ pub fn update_spawned_relations(
 pub fn enemy_collisions(
     mut msg: MessageWriter<GameMsg>,
     mut audio: MessageWriter<AudioMsg>,
-    mut query: Query<(Entity, &mut Foe, &Transform)>,
+    mut query: Query<(Entity, &mut Foe, &Transform), Without<Player>>,
     stats: Single<(&mut Stats, &mut Text)>,
     window: Single<&Window>,
     cache: Res<FoePointsCache>,
+    player: Single<&Transform, With<Player>>,
 ) {
     let (mut stats, mut score_text) = stats.into_inner();
     let mut score_change = false;
     let mut iter = query.iter_combinations_mut();
     let viewport_width = viewport_width(&window);
+    let player_pos = player.translation.xy();
 
     while let Some(
         [
@@ -1158,6 +1154,7 @@ pub fn enemy_collisions(
                     transform_a.translation,
                     if a_to_b { -normal } else { normal },
                     viewport_width,
+                    player_pos,
                 );
             }
             if !enemy_b.colliding {
@@ -1168,14 +1165,23 @@ pub fn enemy_collisions(
                     transform_b.translation,
                     if a_to_b { normal } else { -normal },
                     viewport_width,
+                    player_pos,
                 );
             }
-            if in_viewport(transform_a.translation, viewport_width, Vec2::ZERO)
-                && in_viewport(transform_b.translation, viewport_width, Vec2::ZERO)
-            {
+            if in_viewport(
+                transform_a.translation,
+                viewport_width,
+                Vec2::ZERO,
+                player_pos,
+            ) && in_viewport(
+                transform_b.translation,
+                viewport_width,
+                Vec2::ZERO,
+                player_pos,
+            ) {
                 stats.inc_score(1);
+                score_change = true;
             }
-            score_change = true;
         }
     }
     if score_change {
@@ -1209,7 +1215,7 @@ pub fn explosion_system(
 
 pub fn player_collisions(
     mut enemies: Query<(Entity, &mut Foe), Without<Player>>,
-    mut obstacles: Query<&Transform, (With<Obstacle>, Without<Player>)>,
+    obstacles: Query<&Transform, (With<Obstacle>, Without<Player>)>,
     mut msg: MessageWriter<GameMsg>,
     mut audio: MessageWriter<AudioMsg>,
     player: Single<(Entity, &Transform), With<Player>>,
@@ -1234,7 +1240,7 @@ pub fn player_collisions(
         }
     }
 
-    for o_transform in obstacles.iter_mut() {
+    for o_transform in obstacles.iter() {
         if circle_polygon_collide(
             o_transform.translation.xy(),
             OBSTACLE_RADIUS,
@@ -1247,13 +1253,11 @@ pub fn player_collisions(
     }
 
     if hit && !INVINCIBLE {
-        if stats.running {
-            msg.write(GameMsg::Explosion(player_transform.translation.xy()));
-            audio.write(AudioMsg::Explosion);
-            msg.write(GameMsg::Invisible(player_entity));
-            msg.write(GameMsg::Invisible(*indicator));
-            msg.write(GameMsg::GameEnd);
-        }
+        msg.write(GameMsg::Explosion(player_transform.translation.xy()));
+        audio.write(AudioMsg::Explosion);
+        msg.write(GameMsg::Invisible(player_entity));
+        msg.write(GameMsg::Invisible(*indicator));
+        msg.write(GameMsg::GameEnd);
         stats.running = false;
     }
 }
@@ -1287,7 +1291,8 @@ pub fn spawner(
     mut msg: MessageWriter<GameMsg>,
     mut spawner: ResMut<Spawner>,
     window: Single<&Window>,
-    config: ResMut<Config>,
+    config: Res<Config>,
+    player: Single<&Transform, With<Player>>,
 ) {
     spawner.foe_delay -= time.delta_secs();
 
@@ -1302,7 +1307,7 @@ pub fn spawner(
 
         msg.write(GameMsg::SpawnFoe(
             shape,
-            spawn_location(width, &mut spawner),
+            spawn_location(width, &mut spawner) + player.translation.xy(),
             None,
             None,
         ));
@@ -1371,7 +1376,6 @@ pub fn track_selected_enemy(
             &mut launcher_transform,
             selected_transform,
         );
-
         indicator_transform.translation.x = selected_transform.translation.x;
         indicator_transform.translation.y = selected_transform.translation.y;
         if !indicator.active {
@@ -1385,14 +1389,16 @@ pub fn track_selected_enemy(
 }
 
 pub fn obstacle_collisions(
-    mut enemies: Query<(Entity, &mut Foe, &Transform), Without<Obstacle>>,
+    mut enemies: Query<(Entity, &mut Foe, &Transform), (Without<Obstacle>, Without<Player>)>,
     mut obstacles: Query<(&mut Obstacle, &Transform), Without<Foe>>,
     mut msg: MessageWriter<GameMsg>,
     mut audio: MessageWriter<AudioMsg>,
     window: Single<&Window>,
     cache: Res<FoePointsCache>,
+    player: Single<&Transform, (With<Player>, Without<Foe>, Without<Obstacle>)>,
 ) {
     let viewport_width = viewport_width(&window);
+    let player_pos = player.translation.xy();
 
     for (_, o_transform) in obstacles.iter_mut() {
         for (e_ent, mut e, e_transform) in enemies.iter_mut() {
@@ -1413,6 +1419,7 @@ pub fn obstacle_collisions(
                     e_transform.translation,
                     -normal,
                     viewport_width,
+                    player_pos,
                 );
             }
         }
@@ -1454,14 +1461,17 @@ pub fn obstacle(
     mut msg: MessageWriter<GameMsg>,
     time: Res<Time<Virtual>>,
     window: Single<&Window>,
+    player: Single<&Transform, (With<Player>, Without<Obstacle>)>,
 ) {
     let viewport_width = viewport_width(&window);
     let dt = time.delta_secs();
+    let player_pos = player.translation.xy();
     for (ent, o, mut transform) in obstacles.iter_mut() {
         let in_viewport = in_viewport(
             transform.translation,
             viewport_width,
             Vec2::splat(-OBSTACLE_RADIUS),
+            player_pos,
         );
         transform.translation += o.velocity.extend(0.) * dt;
         if !in_viewport {
@@ -1499,81 +1509,6 @@ pub fn slowdown_time(
     }
 }
 
-pub fn shockwave_system(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    mut shockwaves: Query<(Entity, &mut Shockwave, &Transform, &Mesh2d)>,
-    enemies: Query<(Entity, &Foe, &Transform), (With<Foe>, Without<ToDespawn>)>,
-    mut obstacles: Query<(Entity, &mut Obstacle, &Transform), Without<ToDespawn>>,
-    mut msg: MessageWriter<GameMsg>,
-    cache: Res<FoePointsCache>,
-    mut audio: MessageWriter<AudioMsg>,
-    stats: Single<(&mut Stats, &mut Text)>,
-    time: Res<Time<Virtual>>,
-    window: Single<&Window>,
-) {
-    let dt = time.delta_secs();
-    let vp_width = viewport_width(&window);
-    let (mut stats_inner, mut score_text) = stats.into_inner();
-    let max_radius =
-        (VIEWPORT_HEIGHT * window.width() / window.height()).max(VIEWPORT_HEIGHT) * 1.2;
-    let mut score_changed = false;
-
-    for (sw_entity, mut sw, sw_transform, mesh2d) in shockwaves.iter_mut() {
-        sw.radius += SHOCKWAVE_SPEED * dt;
-        let inner = (sw.radius - SHOCKWAVE_THICKNESS / 2.).max(0.);
-        let outer = sw.radius + SHOCKWAVE_THICKNESS / 2.;
-
-        if let Some(mesh) = meshes.get_mut(mesh2d.id()) {
-            *mesh = Annulus::new(inner, outer)
-                .mesh()
-                .resolution(RING_RESOLUTIONS)
-                .build();
-        }
-
-        if let Some(mat) = materials.get_mut(&sw.material) {
-            let fade = (1. - sw.radius / max_radius).max(0.);
-            mat.color = colors::GLOW.with_alpha(fade * 0.85);
-        }
-
-        let sw_center = sw_transform.translation.xy();
-
-        for (e_entity, foe, e_transform) in &enemies {
-            let Some(points) = cache.0.get(&e_entity) else {
-                continue;
-            };
-            let pts = &points.data[..points.len];
-            let in_outer = circle_polygon_collide(sw_center, outer, pts).is_some();
-            let in_inner = pts.iter().all(|p| p.xy().distance(sw_center) <= inner);
-            if in_outer && !in_inner {
-                msg.write(GameMsg::Explosion(e_transform.translation.xy()));
-                if in_viewport(e_transform.translation, vp_width, Vec2::ZERO) {
-                    audio.write(AudioMsg::Explosion);
-                }
-                msg.write(GameMsg::Despawn(e_entity));
-                stats_inner.inc_score(foe.num_points());
-                score_changed = true;
-            }
-        }
-
-        for (_, mut obstacle, o_transform) in &mut obstacles {
-            let dist = (o_transform.translation.xy() - sw_center).length();
-            if dist - OBSTACLE_RADIUS <= outer && dist + OBSTACLE_RADIUS >= inner {
-                obstacle.velocity = (o_transform.translation.xy() - sw_center).normalize_or_zero()
-                    * SHOCKWAVE_OBSTACLE_SPEED;
-            }
-        }
-
-        if sw.radius > max_radius {
-            commands.entity(sw_entity).despawn();
-        }
-    }
-    if score_changed {
-        stats_inner.show(&mut score_text);
-    }
-}
-
 fn launcher_ring_mesh(inner_r: f32, outer_r: f32, progress: f32) -> Mesh {
     let filled = (RING_RESOLUTIONS as f32 * progress.clamp(0., 1.)).ceil() as usize;
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity((filled + 1) * 2);
@@ -1601,25 +1536,27 @@ fn launcher_ring_mesh(inner_r: f32, outer_r: f32, progress: f32) -> Mesh {
 }
 
 pub fn update_launcher_ring(
-    combo: Res<Combo>,
+    fuel: Res<Fuel>,
     mut meshes: ResMut<Assets<Mesh>>,
     ring: Single<(&Mesh2d, &mut Visibility), With<LauncherRing>>,
+    stats: Single<&Stats>,
+    time: Res<Time<Virtual>>,
 ) {
-    if combo.is_changed() {
-        let progress = combo.0 as f32 / COMBO_THRESHOLD as f32;
-        let (mesh2d, mut visibility) = ring.into_inner();
-        if progress <= 0. {
-            *visibility = Visibility::Hidden;
-        } else {
-            *visibility = Visibility::Inherited;
-            if let Some(mesh) = meshes.get_mut(mesh2d.id()) {
-                *mesh = launcher_ring_mesh(
-                    PLAYER_RING_RADIUS - PLAYER_RING_THICKNESS / 2.,
-                    PLAYER_RING_RADIUS + PLAYER_RING_THICKNESS / 2.,
-                    progress,
-                );
-            }
-        }
+    let m = fuel.0;
+    let (mesh2d, mut visibility) = ring.into_inner();
+    *visibility = if stats.running && !time.is_paused() && m > 0. {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    if fuel.is_changed()
+        && let Some(mesh) = meshes.get_mut(mesh2d.id())
+    {
+        *mesh = launcher_ring_mesh(
+            PLAYER_RING_RADIUS - PLAYER_RING_THICKNESS / 2.,
+            PLAYER_RING_RADIUS + PLAYER_RING_THICKNESS / 2.,
+            m,
+        );
     }
 }
 
@@ -1661,4 +1598,35 @@ pub fn lock_launcher_ring(
     for mut t in ring.iter_mut() {
         t.rotation = rotation.inverse();
     }
+}
+
+pub fn fuel_charge(
+    mut fuel: ResMut<Fuel>,
+    key: Res<KeyState>,
+    mode: Res<Mode>,
+    stats: Single<&Stats>,
+    time: Res<Time<Virtual>>,
+) {
+    if !stats.running || time.is_paused() {
+        return;
+    }
+    if INVINCIBLE {
+        fuel.0 = 1.;
+        return;
+    }
+    let moving = *mode == Mode::Movement && key.v.is_some();
+    if !moving {
+        fuel.0 = (fuel.0 + FUEL_PASSIVE_RATE * time.delta_secs()).min(1.);
+    }
+}
+
+pub fn update_stars(
+    camera: Single<&Transform, (With<Camera2d>, Without<StarQuad>)>,
+    mut quad: Single<&mut Transform, (With<StarQuad>, Without<Camera2d>)>,
+    window: Single<&Window>,
+) {
+    let cam = camera.translation;
+    let vw = VIEWPORT_HEIGHT * window.width() / window.height();
+    quad.translation = Vec3::new(cam.x, cam.y, STAR_Z_INDEX);
+    quad.scale = Vec3::new(vw, VIEWPORT_HEIGHT, 1.);
 }

@@ -421,13 +421,15 @@ pub fn help_setup(mut commands: Commands, config: Res<Config>) {
                 Text::new(format!(
                     "avoid polygons and circles\n\
                      press space to switch between movement and typing modes\n\
-                     use {up}{left}{down}{right} or the arrow keys to move\n\
                      type the keys on a polygon to destroy it\n\
-                     press backspace or . to deselect a polygon",
+                     press backspace or {deselect} to deselect a polygon\n\
+                     use {up}{left}{down}{right} or the arrow keys to move\n\
+                     movement uses fuel, typing and time restore it",
                     up = config.up_char(),
                     left = config.left_char(),
                     down = config.down_char(),
                     right = config.right_char(),
+                    deselect = config.deselect_char(),
                 )),
                 font.clone(),
                 TextColor(colors::LABEL),
@@ -596,7 +598,7 @@ fn add_volume(par: &mut RelatedSpawnerCommands<ChildOf>, config: &Config) {
 }
 
 pub fn credits_setup(mut commands: Commands) {
-    let title_font = text_font();
+    let section_font = text_font();
     let font = small_font();
     commands
         .spawn(screen_with(CreditsScreen))
@@ -623,7 +625,7 @@ pub fn credits_setup(mut commands: Commands) {
                         .with_children(|col| {
                             col.spawn((
                                 Text::new("programming"),
-                                title_font.clone(),
+                                section_font.clone(),
                                 TextColor(colors::LABEL),
                                 Node {
                                     margin: UiRect::bottom(Val::Vh(1.)),
@@ -660,7 +662,7 @@ pub fn credits_setup(mut commands: Commands) {
                         .with_children(|col| {
                             col.spawn((
                                 Text::new("visuals"),
-                                title_font.clone(),
+                                section_font.clone(),
                                 TextColor(colors::LABEL),
                                 Node {
                                     margin: UiRect::bottom(Val::Vh(1.)),
@@ -691,7 +693,7 @@ pub fn credits_setup(mut commands: Commands) {
                     .with_children(|col| {
                         col.spawn((
                             Text::new("tools"),
-                            title_font.clone(),
+                            section_font.clone(),
                             TextColor(colors::LABEL),
                             Node {
                                 margin: UiRect::bottom(Val::Vh(1.)),
