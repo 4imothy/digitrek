@@ -9,7 +9,7 @@ mod menu;
 mod msg;
 
 use bevy::{
-    asset::{embedded_asset, RenderAssetUsages},
+    asset::{RenderAssetUsages, embedded_asset},
     input::common_conditions::input_just_pressed,
     prelude::*,
     render::render_resource::AsBindGroup,
@@ -23,6 +23,8 @@ use std::{collections::HashMap, f32::consts::PI, sync::LazyLock};
 
 const SHOW_LOCAL_POINTS: bool = cfg!(feature = "show_local_points");
 const INVINCIBLE: bool = cfg!(feature = "invincible");
+const NO_OBSTACLES: bool = cfg!(feature = "no_obstacles");
+const ONE_FOE: bool = cfg!(feature = "one_foe");
 const MIN_DELAY: bool = cfg!(feature = "min_delay");
 const TIME_MULTIPLIER: f32 = if cfg!(feature = "speedup") { 5. } else { 1. };
 
@@ -40,6 +42,9 @@ const EXPLOSION_PARTICLE_RADIUS_UPPER: f32 = PLAYER_RADIUS / 5.;
 const PLAYER_RING_RADIUS: f32 = PLAYER_RADIUS * 1.2;
 const PLAYER_RING_THICKNESS: f32 = INDICATOR_THICKNESS / 1.5;
 const PLAYER_NOTCH_RADIUS: f32 = PLAYER_RADIUS * 0.15;
+const SELECTION_ARROW_RADIUS: f32 = PLAYER_RING_RADIUS * 1.5;
+const SELECTION_ARROW_HALF_HEIGHT: f32 = PLAYER_NOTCH_RADIUS * 1.2;
+const SELECTION_ARROW_HALF_WIDTH: f32 = PLAYER_NOTCH_RADIUS * 1.5;
 const HEXAGON_LAUNCHER_LENGTH: f32 = FOE_SIZE * 1.5;
 const HEXAGON_LAUNCHER_WIDTH: f32 = OBSTACLE_RADIUS * 2.;
 const PENTAGON_LAUNCHER_LENGTH: f32 = FOE_SIZE * 1.2;
@@ -64,9 +69,12 @@ const OBSTACLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 3.;
 const KNOCKBACK_DECAY: f32 = 5.;
 const KNOCKBACK_MULTIPLIER: f32 = 1.5;
 const KNOCKBACK_STOP_SPEED: f32 = 15.;
+const FOE_SEPARATION_RADIUS: f32 = FOE_SIZE * 3.;
+const FOE_SEPARATION_WEIGHT: f32 = 0.5;
 
 const FIRST_FOE_SPAWN_DELAY: f32 = 0.;
 const HEXAGON_LAUNCH_DELAY: f32 = 5.;
+const HEXAGON_TARGET_MIN: f32 = 0.8;
 const PENTAGON_SPAWN_DELAY: f32 = 6.;
 const SPAWN_DELTA: f32 = 0.3;
 const SPAWN_LOCATION_MULTIPLIER: f32 = 1.2;
@@ -93,7 +101,6 @@ const FOE_MAX_NUM_KEYS: usize = *SHAPE_NUM_KEYS.last().unwrap();
 const FOE_FONT_SIZE: f32 = 35.;
 const FOE_WORD_BG_CHAR_WIDTH: f32 = 20.;
 const FOE_WORD_BG_PADDING: f32 = 6.;
-const HEXAGON_VIEWPORT_PADDING: f32 = FOE_SIZE * 3.;
 const FOE_AVOID_COUNT: usize = 10;
 const WORD_AVOID_RETRIES: usize = 10;
 const PENTAGON_SUMMON_WEIGHTS: [f32; 1] = [1.0];
@@ -111,30 +118,31 @@ const LAUNCHER_ARM_RECOIL_MIN_SCALE: f32 = 0.3;
 const RING_RESOLUTIONS: u32 = 128;
 
 const FUEL_DRAIN_RATE: f32 = 0.45;
-const FUEL_PER_KEY: f32 = 0.02;
-const FUEL_PASSIVE_RATE: f32 = 0.02;
+const FUEL_PER_KEY: f32 = 0.01;
+const FUEL_PASSIVE_RATE: f32 = 0.01;
 
 const STAR_Z_INDEX: f32 = -1.;
 
+const TRIANGLE: RegularPolygon = RegularPolygon {
+    circumcircle: Circle {
+        radius: FOE_SIZE / 1.5,
+    },
+    sides: 3,
+};
 const TRIANGLE_CENTERING_OFFSET_Y: f32 = FOE_SIZE / 3.;
 const TRIANGLE_LOCAL_POINTS: [Vec3; 3] = [
     Vec3::new(0., FOE_SIZE - TRIANGLE_CENTERING_OFFSET_Y, 0.),
     Vec3::new(FOE_SIZE / 2., -TRIANGLE_CENTERING_OFFSET_Y, 0.),
     Vec3::new(-FOE_SIZE / 2., -TRIANGLE_CENTERING_OFFSET_Y, 0.),
 ];
-const TRIANGLE: Triangle2d = Triangle2d::new(
-    Vec2::new(TRIANGLE_LOCAL_POINTS[0].x, TRIANGLE_LOCAL_POINTS[0].y),
-    Vec2::new(TRIANGLE_LOCAL_POINTS[1].x, TRIANGLE_LOCAL_POINTS[1].y),
-    Vec2::new(TRIANGLE_LOCAL_POINTS[2].x, TRIANGLE_LOCAL_POINTS[2].y),
-);
 const RHOMBUS_LOCAL_POINTS: [Vec3; 4] = [
     Vec3::new(0., -FOE_SIZE, 0.),
-    Vec3::new(-FOE_SIZE / 1.5, 0., 0.),
     Vec3::new(FOE_SIZE / 1.5, 0., 0.),
     Vec3::new(0., FOE_SIZE, 0.),
+    Vec3::new(-FOE_SIZE / 1.5, 0., 0.),
 ];
 const RHOMBUS: Rhombus = Rhombus {
-    half_diagonals: Vec2::new(RHOMBUS_LOCAL_POINTS[2].x, RHOMBUS_LOCAL_POINTS[3].y),
+    half_diagonals: Vec2::new(RHOMBUS_LOCAL_POINTS[1].x, RHOMBUS_LOCAL_POINTS[2].y),
 };
 static PENTAGON_LOCAL_POINTS: LazyLock<[Vec3; 5]> = LazyLock::new(|| {
     let verts = PENTAGON.vertices(0.);
@@ -144,8 +152,18 @@ static PENTAGON_LOCAL_POINTS: LazyLock<[Vec3; 5]> = LazyLock::new(|| {
     }
     points
 });
+static TRIANGLE_VERTEX_DIRS: LazyLock<[Vec2; 1]> =
+    LazyLock::new(|| [TRIANGLE_LOCAL_POINTS[0].xy().normalize()]);
+static RHOMBUS_LEADING_DIRS: LazyLock<[Vec2; 2]> = LazyLock::new(|| {
+    [
+        RHOMBUS_LOCAL_POINTS[0].xy().normalize(),
+        RHOMBUS_LOCAL_POINTS[2].xy().normalize(),
+    ]
+});
 static PENTAGON_VERTEX_DIRS: LazyLock<[Vec2; 5]> =
     LazyLock::new(|| PENTAGON_LOCAL_POINTS.map(|p| p.xy().normalize()));
+static HEXAGON_VERTEX_DIRS: LazyLock<[Vec2; 6]> =
+    LazyLock::new(|| HEXAGON_LOCAL_POINTS.map(|p| p.xy().normalize()));
 const PENTAGON: RegularPolygon = RegularPolygon {
     circumcircle: Circle { radius: FOE_SIZE },
     sides: 5,
@@ -163,9 +181,9 @@ const HEXAGON: RegularPolygon = RegularPolygon {
     sides: 6,
 };
 const PLAYER_LOCAL_TRIANGLE: [Vec3; 3] = [
-    Vec3::new(0., 0., 0.),
-    Vec3::new(PLAYER_RADIUS / 2., PLAYER_RADIUS, 0.),
-    Vec3::new(-PLAYER_RADIUS / 2., PLAYER_RADIUS, 0.),
+    Vec3::new(0., -PLAYER_RADIUS / 2., 0.),
+    Vec3::new(PLAYER_RADIUS / 2., PLAYER_RADIUS / 2., 0.),
+    Vec3::new(-PLAYER_RADIUS / 2., PLAYER_RADIUS / 2., 0.),
 ];
 
 const WORD_LIST_LEN: usize = 2000;
@@ -173,6 +191,14 @@ static WORD_LIST_3: [&str; WORD_LIST_LEN] = include!("../assets/words_3.rs");
 static WORD_LIST_4: [&str; WORD_LIST_LEN] = include!("../assets/words_4.rs");
 static WORD_LIST_5: [&str; WORD_LIST_LEN] = include!("../assets/words_5.rs");
 static WORD_LIST_6: [&str; WORD_LIST_LEN] = include!("../assets/words_6.rs");
+
+pub fn hexagon_target_offset(from: Vec2, player_pos: Vec2, viewport_width: f32) -> Vec2 {
+    let half_w = viewport_width / 2. - FOE_SIZE;
+    let half_h = VIEWPORT_HEIGHT / 2. - FOE_SIZE;
+    let dir = (from - player_pos).normalize_or(Vec2::X);
+    let t_max = (half_w / dir.x.abs()).min(half_h / dir.y.abs());
+    dir * rand::random_range((t_max * HEXAGON_TARGET_MIN)..=t_max)
+}
 
 fn spawner_foe_delay_mu(x: f32, max_dif: bool) -> f32 {
     if MIN_DELAY {
@@ -379,23 +405,23 @@ fn main() {
     let mut pkv = PkvStore::new("timware", env!("CARGO_PKG_NAME"));
     let mut app = App::new();
     app.add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: env!("CARGO_PKG_NAME").to_string(),
-                    ..default()
-                }),
+        DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: env!("CARGO_PKG_NAME").to_string(),
                 ..default()
             }),
-            Material2dPlugin::<StarfieldMaterial>::default(),
-            menu_plugin,
-            game_plugin,
-        ))
-        .add_message::<PauseMsg>()
-        .add_systems(Startup, setup)
-        .init_state::<Screen>()
-        .insert_resource(Config::load(&mut pkv))
-        .insert_resource(ClearColor(colors::BASE))
-        .insert_resource(pkv);
+            ..default()
+        }),
+        Material2dPlugin::<StarfieldMaterial>::default(),
+        menu_plugin,
+        game_plugin,
+    ))
+    .add_message::<PauseMsg>()
+    .add_systems(Startup, setup)
+    .init_state::<Screen>()
+    .insert_resource(Config::load(&mut pkv))
+    .insert_resource(ClearColor(colors::BASE))
+    .insert_resource(pkv);
     embedded_asset!(app, "starfield.wgsl");
     app.run();
 }
@@ -574,7 +600,6 @@ fn game_plugin(app: &mut App) {
                 )
                     .after(game::foe_points),
                 game::spawner,
-                game::track_selected_enemy,
                 game::update_clock,
             )
                 .run_if(in_state(Screen::Game)),
@@ -584,6 +609,7 @@ fn game_plugin(app: &mut App) {
             (
                 game::camera_follow,
                 game::player_movement,
+                game::track_selected_enemy.after(game::player_movement),
                 game::keypress,
                 game::slowdown_time,
                 game::projectile,
@@ -617,8 +643,9 @@ fn game_plugin(app: &mut App) {
                 msg::on_audio,
                 game::reset_collisions.after(msg::on_msg),
                 game::despawner.after(msg::on_msg),
-                game::lock_enemy_text.before(TransformSystems::Propagate),
-                game::lock_enemy_text.after(msg::on_msg),
+                game::lock_enemy_text
+                    .after(msg::on_msg)
+                    .before(TransformSystems::Propagate),
                 game::lock_launcher_ring.after(TransformSystems::Propagate),
             )
                 .run_if(in_state(Screen::Game)),
@@ -678,6 +705,7 @@ enum GameScreen {
 #[derive(Component)]
 struct Player {
     selected: Option<Entity>,
+    selection_active: bool,
 }
 
 #[derive(Message)]
@@ -716,7 +744,6 @@ struct Summoner {
     since: f32,
     delay: f32,
     foe_dist: WeightedIndex<f32>,
-    leading_vertex: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -727,6 +754,17 @@ enum Shape {
     Hexagon,
 }
 
+impl Shape {
+    fn vertex_dirs(self) -> &'static [Vec2] {
+        match self {
+            Shape::Triangle => &*TRIANGLE_VERTEX_DIRS,
+            Shape::Rhombus => &*RHOMBUS_LEADING_DIRS,
+            Shape::Pentagon => &*PENTAGON_VERTEX_DIRS,
+            Shape::Hexagon => &*HEXAGON_VERTEX_DIRS,
+        }
+    }
+}
+
 #[derive(Component)]
 struct Tracking;
 
@@ -734,8 +772,8 @@ struct Tracking;
 struct Launcher {
     since: f32,
     delay: f32,
-    target_pos: Vec2,
-    stopped: bool,
+    target_offset: Vec2,
+    anchor_player_pos: Vec2,
 }
 
 #[derive(Component)]
@@ -756,9 +794,10 @@ struct Targeted;
 struct ToDespawn;
 
 #[derive(Component)]
-struct Indicator {
-    active: bool,
-}
+struct Indicator;
+
+#[derive(Component)]
+struct SelectionArrowPivot;
 
 #[derive(Component)]
 struct PlayerLauncher;
@@ -844,6 +883,7 @@ struct Foe {
     colliding: bool,
     spawned_by: Option<Entity>,
     entered_viewport: bool,
+    leading_dir: Vec2,
 }
 
 impl Foe {
@@ -864,6 +904,7 @@ impl Foe {
             colliding: false,
             spawned_by,
             entered_viewport: false,
+            leading_dir: shape.vertex_dirs()[0],
         }
     }
 }

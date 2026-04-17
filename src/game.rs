@@ -2,6 +2,7 @@
 
 use crate::*;
 use bevy::{
+    camera::visibility::NoFrustumCulling,
     input::{
         ButtonState,
         keyboard::{Key, KeyboardInput},
@@ -29,18 +30,25 @@ pub fn setup(
     vtime.set_relative_speed(TIME_MULTIPLIER);
     commands
         .spawn((
-            Mesh2d(meshes.add(CircularSector::new(PLAYER_RADIUS, PLAYER_HALF_ANGLE))),
-            MeshMaterial2d(materials.add(colors::PLAYER)),
             Transform {
-                translation: Vec3::new(0., PLAYER_RADIUS, PLAYER_Z_INDEX),
+                translation: Vec3::new(0., PLAYER_RADIUS / 2., PLAYER_Z_INDEX),
                 rotation: Quat::from_rotation_z(PI),
                 ..default()
             },
-            Player { selected: None },
+            Visibility::Inherited,
+            Player {
+                selected: None,
+                selection_active: false,
+            },
         ))
         .with_children(|cmds| {
             cmds.spawn((
-                Transform::from_xyz(0., PLAYER_RADIUS / 2., 0.),
+                Mesh2d(meshes.add(CircularSector::new(PLAYER_RADIUS, PLAYER_HALF_ANGLE))),
+                MeshMaterial2d(materials.add(colors::PLAYER)),
+                Transform::from_xyz(0., -PLAYER_RADIUS / 2., 0.),
+            ));
+            cmds.spawn((
+                Transform::from_xyz(0., 0., 0.),
                 Visibility::Inherited,
                 PlayerLauncher,
             ))
@@ -58,7 +66,7 @@ pub fn setup(
                     PLAYER_RING_RADIUS + PLAYER_RING_THICKNESS / 2.,
                 ))),
                 MeshMaterial2d(materials.add(colors::LAUNCHER)),
-                Transform::from_xyz(0., PLAYER_RADIUS / 2., 0.5),
+                Transform::from_xyz(0., 0., 0.5),
             ));
             cmds.spawn((
                 LauncherRing,
@@ -68,7 +76,7 @@ pub fn setup(
                     0.,
                 ))),
                 MeshMaterial2d(materials.add(colors::GLOW)),
-                Transform::from_xyz(0., PLAYER_RADIUS / 2., 0.6),
+                Transform::from_xyz(0., 0., 0.6),
                 Visibility::Hidden,
             ));
             cmds.spawn((
@@ -77,7 +85,7 @@ pub fn setup(
                     PLAYER_ENGINE_WIDTH / 2.,
                 ))),
                 MeshMaterial2d(materials.add(colors::LAUNCHER)),
-                Transform::from_xyz(0., PLAYER_RADIUS, -1.),
+                Transform::from_xyz(0., PLAYER_RADIUS / 2., -1.),
             ));
             cmds.spawn((
                 Mesh2d(meshes.add(CircularSector::new(
@@ -85,10 +93,27 @@ pub fn setup(
                     FRAC_PI_2,
                 ))),
                 MeshMaterial2d(materials.add(colors::GLOW)),
-                Transform::from_xyz(0., PLAYER_RADIUS + PLAYER_ENGINE_WIDTH / 4., 2.),
+                Transform::from_xyz(0., PLAYER_RADIUS / 2. + PLAYER_ENGINE_WIDTH / 4., 2.),
                 Visibility::Hidden,
                 EngineGlow,
             ));
+            cmds.spawn((
+                Transform::from_xyz(0., 0., 0.),
+                Visibility::Hidden,
+                SelectionArrowPivot,
+            ))
+            .with_children(|c| {
+                c.spawn((
+                    Mesh2d(meshes.add(Triangle2d::new(
+                        Vec2::new(0., SELECTION_ARROW_HALF_HEIGHT),
+                        Vec2::new(-SELECTION_ARROW_HALF_WIDTH, -SELECTION_ARROW_HALF_HEIGHT),
+                        Vec2::new(SELECTION_ARROW_HALF_WIDTH, -SELECTION_ARROW_HALF_HEIGHT),
+                    ))),
+                    MeshMaterial2d(materials.add(colors::INDICATOR)),
+                    Transform::from_xyz(0., SELECTION_ARROW_RADIUS, 0.5),
+                    NoFrustumCulling,
+                ));
+            });
             if SHOW_LOCAL_POINTS {
                 let circle = Circle::new(10.);
                 let circle_mesh = meshes.add(Mesh::from(circle));
@@ -105,7 +130,7 @@ pub fn setup(
 
     commands
         .spawn((
-            Indicator { active: false },
+            Indicator,
             Mesh2d(meshes.add(Annulus::new(
                 INDICATOR_RADIUS - INDICATOR_THICKNESS / 2.,
                 INDICATOR_RADIUS + INDICATOR_THICKNESS / 2.,
@@ -264,6 +289,7 @@ impl Foe {
         self.colliding = true;
         if let Some(shape) = self.shape.downgraded_shape() {
             self.shape = shape;
+            self.leading_dir = shape.vertex_dirs()[0];
             self.skipped += 1;
             if self.cleared + self.skipped >= self.orig_len {
                 explosion_in_viewport(pos, viewport_width, center, msg, audio);
@@ -352,6 +378,7 @@ pub fn keypress(
     notch_material: Single<&MeshMaterial2d<ColorMaterial>, With<LauncherNotch>>,
     mut color_materials: ResMut<Assets<ColorMaterial>>,
     indicator: Single<Entity, (With<Indicator>, Without<Player>)>,
+    arrow_pivot: Single<Entity, (With<SelectionArrowPivot>, Without<Player>)>,
     mut enemy_query: Query<
         (Entity, &mut Foe, &mut Transform),
         (Without<Player>, Without<Indicator>, Without<PlayerLauncher>),
@@ -379,6 +406,8 @@ pub fn keypress(
         }
         if key.key_code == config.deselect() && *mode == Mode::Movement {
             msg.write(GameMsg::Invisible(*indicator));
+            msg.write(GameMsg::Invisible(*arrow_pivot));
+            player.selection_active = false;
             if let Some(selected) = player.selected {
                 msg.write(GameMsg::DeSelect(selected));
             }
@@ -401,6 +430,8 @@ pub fn keypress(
             }
             Key::Backspace => {
                 msg.write(GameMsg::Invisible(*indicator));
+                msg.write(GameMsg::Invisible(*arrow_pivot));
+                player.selection_active = false;
                 if let Some(selected) = player.selected {
                     msg.write(GameMsg::DeSelect(selected));
                 }
@@ -409,11 +440,16 @@ pub fn keypress(
             Key::Character(str) if *mode == Mode::Typing => {
                 if let Some(key) = str.chars().next().map(|c| c.to_ascii_lowercase()) {
                     if let Some(selected) = player.selected
-                        && let Ok((selected_entity, mut selected_enemy, _)) =
+                        && let Ok((selected_entity, mut selected_enemy, selected_transform)) =
                             enemy_query.get_mut(selected)
                     {
                         found_selected = true;
                         if key == selected_enemy.keys[selected_enemy.next_index] {
+                            point_launcher(
+                                player_transform,
+                                &mut launcher_transform,
+                                &selected_transform,
+                            );
                             fuel.0 = (fuel.0 + FUEL_PER_KEY).min(1.);
                             selected_enemy.next_index += 1;
                             msg.write(GameMsg::Projectile(
@@ -422,6 +458,8 @@ pub fn keypress(
                             ));
                             if selected_enemy.keys_to_type() == 0 {
                                 msg.write(GameMsg::Invisible(*indicator));
+                                msg.write(GameMsg::Invisible(*arrow_pivot));
+                                player.selection_active = false;
                                 msg.write(GameMsg::DeSelect(selected));
                                 player.selected = None;
                             }
@@ -460,13 +498,12 @@ pub fn keypress(
                             if ce.keys_to_type() > 1 {
                                 player.selected = closest_entity;
                                 msg.write(GameMsg::Select(e));
-                            } else {
-                                point_launcher(
-                                    player_transform,
-                                    &mut launcher_transform,
-                                    &closest_enemy_transform.unwrap(),
-                                );
                             }
+                            point_launcher(
+                                player_transform,
+                                &mut launcher_transform,
+                                &closest_enemy_transform.unwrap(),
+                            );
 
                             fuel.0 = (fuel.0 + FUEL_PER_KEY).min(1.);
                             ce.next_index += 1;
@@ -481,6 +518,8 @@ pub fn keypress(
                         }
                         if player.selected.is_none() {
                             msg.write(GameMsg::Invisible(*indicator));
+                            msg.write(GameMsg::Invisible(*arrow_pivot));
+                            player.selection_active = false;
                         }
                     }
                 }
@@ -596,7 +635,7 @@ pub fn summoner(
 
 pub fn summoner_foe(
     time: Res<Time<Virtual>>,
-    mut query: Query<(&mut Foe, &mut Summoner, &mut Transform)>,
+    mut query: Query<(&mut Foe, &mut Transform), With<Summoner>>,
     player: Single<&Transform, (With<Player>, Without<Foe>)>,
     window: Single<&Window>,
 ) {
@@ -604,7 +643,7 @@ pub fn summoner_foe(
     let viewport_width = viewport_width(&window);
     let player_pos = player.translation.xy();
 
-    for (mut foe, mut sum, mut transform) in &mut query {
+    for (mut foe, mut transform) in &mut query {
         if !foe.entered_viewport
             && in_viewport(
                 transform.translation,
@@ -629,12 +668,16 @@ pub fn summoner_foe(
                 ((dist - SUMMONER_ORBIT_RADIUS) / SUMMONER_ORBIT_RADIUS).clamp(-1.0, 1.0);
 
             let dir = (radial * radial_weight + tangential).normalize_or_zero();
+            let dirs = foe.shape.vertex_dirs();
+            let rot_speed = foe.rot_speed();
+            let mov_speed = foe.mov_speed();
             move_nearest_vertex_towards(
                 &mut transform,
                 dir,
-                &mut sum.leading_vertex,
-                foe.rot_speed(),
-                foe.mov_speed(),
+                &mut foe.leading_dir,
+                dirs,
+                rot_speed,
+                mov_speed,
                 dt,
             );
         }
@@ -667,18 +710,26 @@ pub fn launcher_foe(
             continue;
         }
 
-        if launcher.stopped {
-            continue;
+        if foe.entered_viewport
+            && !in_viewport(
+                transform.translation,
+                viewport_width,
+                Vec2::splat(FOE_SIZE),
+                player_pos,
+            )
+        {
+            launcher.target_offset =
+                hexagon_target_offset(transform.translation.xy(), player_pos, viewport_width);
+            launcher.anchor_player_pos = player_pos;
         }
-
+        let target = launcher.anchor_player_pos + launcher.target_offset;
         let pos = transform.translation.xy();
-        let to_target = launcher.target_pos - pos;
+        let to_target = target - pos;
         let dist = to_target.length();
 
         if dist < foe.mov_speed() * dt {
-            transform.translation.x = launcher.target_pos.x;
-            transform.translation.y = launcher.target_pos.y;
-            launcher.stopped = true;
+            transform.translation.x = target.x;
+            transform.translation.y = target.y;
         } else {
             let dir = to_target.normalize();
             transform.translation += (dir * foe.mov_speed() * dt).extend(0.);
@@ -697,7 +748,7 @@ pub fn foe_launcher(
 ) {
     let dt = time.delta_secs();
 
-    for (mut foe, mut launcher, hex_transform, children) in &mut query {
+    for (mut foe, mut launcher, foe_transform, children) in &mut query {
         launcher.since += dt;
 
         if launcher.since >= launcher.delay {
@@ -706,14 +757,15 @@ pub fn foe_launcher(
             for child in children.iter() {
                 if let Ok((launcher_transform, mut foe_launcher)) = launcher_query.get_mut(child) {
                     let tip_local = Vec3::new(HEXAGON_LAUNCHER_LENGTH, 0., 0.);
-                    let tip_world = hex_transform
+                    let tip_world = foe_transform
                         .transform_point(launcher_transform.transform_point(tip_local));
-                    let direction = (player.translation.xy() - hex_transform.translation.xy())
+                    let direction = (player.translation.xy() - foe_transform.translation.xy())
                         .normalize_or_zero();
-                    msg.write(GameMsg::SpawnObstacle(tip_world.xy(), direction));
+                    if !NO_OBSTACLES {
+                        msg.write(GameMsg::SpawnObstacle(tip_world.xy(), direction));
+                    }
                     audio.write(AudioMsg::FoeLaunch);
                     foe.knockback = Some(-direction * LAUNCH_RECOIL_SPEED);
-                    launcher.stopped = false;
                     foe_launcher.recoil = 1.0;
                     break;
                 }
@@ -740,15 +792,15 @@ pub fn track_player_for_foe_launcher(
     time: Res<Time<Virtual>>,
 ) {
     let dt = time.delta_secs();
-    for (hex_transform, children) in &mut query {
+    for (foe_transform, children) in &mut query {
         for child in children.iter() {
             if let Ok((mut launcher_transform, mut foe_launcher)) = launcher_query.get_mut(child) {
                 let player_world = player.translation.xy();
-                let hex_pos = hex_transform.translation.xy();
+                let hex_pos = foe_transform.translation.xy();
                 let to_player = player_world - hex_pos;
                 let target_angle = to_player.to_angle();
 
-                let (_, _, hex_rot_z) = hex_transform.rotation.to_euler(EulerRot::XYZ);
+                let (_, _, hex_rot_z) = foe_transform.rotation.to_euler(EulerRot::XYZ);
                 let local_angle = target_angle - hex_rot_z;
 
                 launcher_transform.rotation = Quat::from_rotation_z(local_angle);
@@ -781,14 +833,22 @@ fn in_viewport(pos: Vec3, viewport_width: f32, padding: Vec2, center: Vec2) -> b
 
 pub fn tracking_foe(
     time: Res<Time<Virtual>>,
-    mut query: Query<(&mut Foe, &mut Transform), (With<Tracking>, Without<Player>)>,
+    mut query: Query<(Entity, &mut Foe, &mut Transform), (With<Tracking>, Without<Player>)>,
+    non_tracking: Query<(Entity, &Transform), (With<Foe>, Without<Tracking>, Without<Player>)>,
     player_transform: Single<&Transform, With<Player>>,
     window: Single<&Window>,
 ) {
     let player_translation = player_transform.translation.xy();
     let viewport_width = viewport_width(&window);
+    let dt = time.delta_secs();
 
-    for (mut foe, mut transform) in &mut query {
+    let mut positions: Vec<(Entity, Vec2)> = query
+        .iter()
+        .map(|(e, _, t)| (e, t.translation.xy()))
+        .collect();
+    positions.extend(non_tracking.iter().map(|(e, t)| (e, t.translation.xy())));
+
+    for (entity, mut foe, mut transform) in &mut query {
         if !foe.entered_viewport
             && in_viewport(
                 transform.translation,
@@ -799,15 +859,36 @@ pub fn tracking_foe(
         {
             foe.entered_viewport = true;
         }
-        let dt = time.delta_secs();
+        let pos = transform.translation.xy();
+        let mut sep = Vec2::ZERO;
+        for (other_entity, other_pos) in &positions {
+            if *other_entity == entity {
+                continue;
+            }
+            let diff = pos - *other_pos;
+            let dist = diff.length();
+            if dist < FOE_SEPARATION_RADIUS && dist > 0. {
+                sep += diff.normalize() * (1. - dist / FOE_SEPARATION_RADIUS);
+            }
+        }
+        let sep_push = sep.clamp_length_max(1.) * FOE_SEPARATION_WEIGHT;
+
         if foe.knockback.is_some() {
             knockback(&mut foe, &mut transform, dt);
+            transform.translation += sep_push.extend(0.) * foe.mov_speed() * dt;
         } else {
-            move_and_rotate_towards(
+            let toward_player = (player_translation - pos).normalize_or_zero();
+            let desired = (toward_player + sep_push).normalize_or_zero();
+            let dirs = foe.shape.vertex_dirs();
+            let rot_speed = foe.rot_speed();
+            let mov_speed = foe.mov_speed();
+            move_nearest_vertex_towards(
                 &mut transform,
-                player_translation,
-                foe.rot_speed(),
-                foe.mov_speed(),
+                desired,
+                &mut foe.leading_dir,
+                dirs,
+                rot_speed,
+                mov_speed,
                 dt,
             );
         }
@@ -824,34 +905,11 @@ fn knockback(foe: &mut Foe, transform: &mut Transform, dt: f32) {
     }
 }
 
-fn move_and_rotate_towards(
-    transform: &mut Transform,
-    target: Vec2,
-    rot_speed: f32,
-    mov_speed: f32,
-    dt: f32,
-) {
-    let current_pos = transform.translation.xy();
-    let to_target = (target - current_pos).normalize_or_zero();
-
-    let angle_to_target = (transform.rotation * Vec3::Y)
-        .xy()
-        .normalize_or_zero()
-        .angle_to(to_target);
-
-    let max_delta = rot_speed * dt;
-    let clamped_angle = angle_to_target.clamp(-max_delta, max_delta);
-
-    transform.rotate_z(clamped_angle);
-
-    let forward_direction = transform.rotation * Vec3::Y;
-    transform.translation += forward_direction * mov_speed * dt;
-}
-
 fn move_nearest_vertex_towards(
     transform: &mut Transform,
     target_dir: Vec2,
-    leading_vertex: &mut usize,
+    leading_dir: &mut Vec2,
+    dirs: &[Vec2],
     rot_speed: f32,
     mov_speed: f32,
     dt: f32,
@@ -859,23 +917,18 @@ fn move_nearest_vertex_towards(
     if target_dir == Vec2::ZERO {
         return;
     }
-
-    let dirs = &*PENTAGON_VERTEX_DIRS;
     let target_local = (transform.rotation.inverse() * target_dir.extend(0.)).xy();
-    if dirs[*leading_vertex].dot(target_local) < COS_MIN_LEADING_VERTEX_ALIGNMENT {
-        *leading_vertex = dirs
+    if dirs.len() > 1 && leading_dir.dot(target_local) < COS_MIN_LEADING_VERTEX_ALIGNMENT {
+        *leading_dir = *dirs
             .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.dot(target_local).total_cmp(&b.dot(target_local)))
-            .unwrap()
-            .0;
+            .max_by(|a, b| a.dot(target_local).total_cmp(&b.dot(target_local)))
+            .unwrap();
     }
 
-    let v = dirs[*leading_vertex];
-    let snap = Quat::from_rotation_z(target_dir.to_angle() - v.to_angle());
+    let snap = Quat::from_rotation_z(target_dir.to_angle() - leading_dir.to_angle());
     transform.rotation = transform.rotation.rotate_towards(snap, rot_speed * dt);
 
-    let move_dir = (transform.rotation * v.extend(0.)).xy();
+    let move_dir = (transform.rotation * leading_dir.extend(0.)).xy();
     transform.translation += (move_dir * mov_speed * dt).extend(0.);
 }
 
@@ -1214,12 +1267,13 @@ pub fn explosion_system(
 }
 
 pub fn player_collisions(
-    mut enemies: Query<(Entity, &mut Foe), Without<Player>>,
+    mut enemies: Query<(Entity, &mut Foe, &Transform), Without<Player>>,
     obstacles: Query<&Transform, (With<Obstacle>, Without<Player>)>,
     mut msg: MessageWriter<GameMsg>,
     mut audio: MessageWriter<AudioMsg>,
     player: Single<(Entity, &Transform), With<Player>>,
     indicator: Single<Entity, With<Indicator>>,
+    arrow_pivot: Single<Entity, With<SelectionArrowPivot>>,
     mut stats: Single<&mut Stats>,
     cache: Res<FoePointsCache>,
 ) {
@@ -1230,11 +1284,25 @@ pub fn player_collisions(
     let player_points = PLAYER_LOCAL_TRIANGLE.map(|p| player_transform.transform_point(p));
 
     let mut hit = false;
-    for (entity, mut e) in enemies.iter_mut() {
+    let mut contact = player_transform.translation.xy();
+    for (entity, mut e, enemy_transform) in enemies.iter_mut() {
         let Some(points) = cache.0.get(&entity) else {
             continue;
         };
         if let Some((normal, a_to_b)) = collide(points.as_slice(), &player_points, None) {
+            if !hit {
+                let ep = enemy_transform.translation.xy();
+                contact = player_points
+                    .iter()
+                    .min_by(|a, b| {
+                        a.xy()
+                            .distance_squared(ep)
+                            .partial_cmp(&b.xy().distance_squared(ep))
+                            .unwrap()
+                    })
+                    .map(|v| v.xy())
+                    .unwrap_or(contact);
+            }
             hit = true;
             e.add_collision(if a_to_b { -normal } else { normal });
         }
@@ -1248,15 +1316,29 @@ pub fn player_collisions(
         )
         .is_some()
         {
+            if !hit {
+                let op = o_transform.translation.xy();
+                contact = player_points
+                    .iter()
+                    .min_by(|a, b| {
+                        a.xy()
+                            .distance_squared(op)
+                            .partial_cmp(&b.xy().distance_squared(op))
+                            .unwrap()
+                    })
+                    .map(|v| v.xy())
+                    .unwrap_or(contact);
+            }
             hit = true;
         }
     }
 
     if hit && !INVINCIBLE {
-        msg.write(GameMsg::Explosion(player_transform.translation.xy()));
+        msg.write(GameMsg::Explosion(contact));
         audio.write(AudioMsg::Explosion);
         msg.write(GameMsg::Invisible(player_entity));
         msg.write(GameMsg::Invisible(*indicator));
+        msg.write(GameMsg::Invisible(*arrow_pivot));
         msg.write(GameMsg::GameEnd);
         stats.running = false;
     }
@@ -1293,8 +1375,13 @@ pub fn spawner(
     window: Single<&Window>,
     config: Res<Config>,
     player: Single<&Transform, With<Player>>,
+    foes: Query<(), With<Foe>>,
 ) {
     spawner.foe_delay -= time.delta_secs();
+
+    if ONE_FOE && !foes.is_empty() {
+        return;
+    }
 
     if spawner.foe_delay <= 0. {
         let mut rng = rand::rng();
@@ -1330,30 +1417,32 @@ pub fn reset_collisions(mut enemies: Query<&mut Foe>, mut obstacles: Query<&mut 
 
 pub fn track_selected_enemy(
     indicator: Single<
-        (Entity, &mut Indicator, &mut Transform),
+        (Entity, &mut Transform),
         (
             With<Indicator>,
             Without<PlayerLauncher>,
             Without<Targeted>,
             Without<Player>,
+            Without<SelectionArrowPivot>,
         ),
     >,
     player: Single<
-        &mut Transform,
+        (&Transform, &mut Player),
         (
-            With<Player>,
             Without<PlayerLauncher>,
             Without<Indicator>,
             Without<Targeted>,
+            Without<SelectionArrowPivot>,
         ),
     >,
-    launcher: Single<
-        &mut Transform,
+    arrow_pivot: Single<
+        (Entity, &mut Transform),
         (
-            With<PlayerLauncher>,
+            With<SelectionArrowPivot>,
             Without<Indicator>,
-            Without<Targeted>,
             Without<Player>,
+            Without<PlayerLauncher>,
+            Without<Targeted>,
         ),
     >,
     selected: Query<
@@ -1363,28 +1452,31 @@ pub fn track_selected_enemy(
             Without<Indicator>,
             Without<PlayerLauncher>,
             Without<Player>,
+            Without<SelectionArrowPivot>,
         ),
     >,
     mut msg: MessageWriter<GameMsg>,
 ) {
-    let (indicator_entity, mut indicator, mut indicator_transform) = indicator.into_inner();
-    let mut launcher_transform = launcher.into_inner();
-    let player_transform = player.into_inner();
+    let (indicator_entity, mut indicator_transform) = indicator.into_inner();
+    let (arrow_pivot_entity, mut arrow_pivot_transform) = arrow_pivot.into_inner();
+    let (player_transform, mut player) = player.into_inner();
     if let Ok(selected_transform) = selected.single() {
         point_launcher(
-            &player_transform,
-            &mut launcher_transform,
+            player_transform,
+            &mut arrow_pivot_transform,
             selected_transform,
         );
         indicator_transform.translation.x = selected_transform.translation.x;
         indicator_transform.translation.y = selected_transform.translation.y;
-        if !indicator.active {
+        if !player.selection_active {
             msg.write(GameMsg::Visible(indicator_entity));
-            indicator.active = true;
+            msg.write(GameMsg::Visible(arrow_pivot_entity));
+            player.selection_active = true;
         }
-    } else if indicator.active {
+    } else if player.selection_active {
         msg.write(GameMsg::Invisible(indicator_entity));
-        indicator.active = false;
+        msg.write(GameMsg::Invisible(arrow_pivot_entity));
+        player.selection_active = false;
     }
 }
 
@@ -1400,7 +1492,7 @@ pub fn obstacle_collisions(
     let viewport_width = viewport_width(&window);
     let player_pos = player.translation.xy();
 
-    for (_, o_transform) in obstacles.iter_mut() {
+    for (_, o_transform) in &obstacles {
         for (e_ent, mut e, e_transform) in enemies.iter_mut() {
             let Some(e_points) = cache.0.get(&e_ent) else {
                 continue;
@@ -1452,7 +1544,6 @@ fn point_launcher(
     let to_target_world = (target.translation - launcher_global_pos).normalize_or_zero();
     let to_target_local = player_transform.rotation.conjugate() * to_target_world;
     let angle = Vec2::Y.angle_to(to_target_local.xy());
-
     launcher_transform.rotation = Quat::from_rotation_z(angle);
 }
 

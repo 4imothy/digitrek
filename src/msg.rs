@@ -149,6 +149,7 @@ pub fn on_msg(
                     viewport_width,
                     &shape_assets,
                     avoid,
+                    player_pos,
                 );
             }
             GameMsg::SpawnObstacle(pos, direction) => {
@@ -258,6 +259,7 @@ fn add_text(
             MeshMaterial2d(bg_mat),
             Transform::from_xyz(0., 0., 0.1),
             EnemyText,
+            NoFrustumCulling,
         ));
         let font = foe_font();
         let mut iter = keys.iter().enumerate().skip(cleared).take(to_show);
@@ -387,6 +389,7 @@ fn spawn_foe(
     viewport_width: f32,
     shape_assets: &ShapeAssets,
     avoid_first: &[char],
+    player_pos: Vec2,
 ) {
     let num_keys = SHAPE_NUM_KEYS[shape.id()];
     let mesh = shape_assets.meshes[shape.id()].clone();
@@ -416,7 +419,6 @@ fn spawn_foe(
             ent_cmds.insert(Summoner {
                 since: 0.,
                 delay: PENTAGON_SPAWN_DELAY,
-                leading_vertex: 0,
                 foe_dist: WeightedIndex::new(PENTAGON_SUMMON_WEIGHTS).unwrap(),
             });
             add_foe_launcher(
@@ -429,14 +431,11 @@ fn spawn_foe(
             );
         }
         Shape::Hexagon => {
-            let half_w = viewport_width / 2. - HEXAGON_VIEWPORT_PADDING;
-            let half_h = VIEWPORT_HEIGHT / 2. - HEXAGON_VIEWPORT_PADDING;
-            let target_pos = Vec2::new(pos.x.clamp(-half_w, half_w), pos.y.clamp(-half_h, half_h));
             ent_cmds.insert(Launcher {
                 since: 0.,
                 delay: HEXAGON_LAUNCH_DELAY,
-                target_pos,
-                stopped: false,
+                target_offset: hexagon_target_offset(pos, player_pos, viewport_width),
+                anchor_player_pos: player_pos,
             });
             add_foe_launcher(
                 &mut ent_cmds,
@@ -492,7 +491,6 @@ fn replace_shape(
             ent_cmds.insert(Summoner {
                 since: 0.,
                 delay: PENTAGON_SPAWN_DELAY,
-                leading_vertex: 0,
                 foe_dist: WeightedIndex::new(PENTAGON_SUMMON_WEIGHTS).unwrap(),
             });
             add_foe_launcher(

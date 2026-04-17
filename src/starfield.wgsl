@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #import bevy_sprite::mesh2d_vertex_output::VertexOutput
 
 @group(2) @binding(0)

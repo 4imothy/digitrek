@@ -6,19 +6,21 @@ edition = "2024"
 [dependencies]
 bevy = "0.18.1"
 bevy_pkv = "0.15.0"
-rand = "0.10.0"
+rand = "0.10.1"
 serde = "1.0.228"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 open = "5.3.3"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = "0.2.117"
-web-sys = { version = "0.3.94", features = ["Window"] }
+wasm-bindgen = "0.2.118"
+web-sys = { version = "0.3.95", features = ["Window"] }
 getrandom = { version = "0.4.2", features = ["wasm_js"] }
 
 [features]
 invincible = []
 show_local_points = []
 min_delay = []
+no_obstacles = []
+one_foe = []
 speedup = []
