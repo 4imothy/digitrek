@@ -9,8 +9,8 @@ pub const GAME_ENGINE_LINK: &str = "https://bevy.org";
 pub const PALETTE_TEXT: &str = "dracula palette";
 pub const PALETTE_LINK: &str = "https://draculatheme.com";
 
-pub const BFXR_TEXT: &str = "bfxr to create sounds";
-pub const BFXR_LINK: &str = "https://www.bfxr.net";
+pub const CSOUND_TEXT: &str = "csound to create sounds";
+pub const CSOUND_LINK: &str = "https://csound.com";
 
 pub const SOURCE_TEXT: &str = "source code";
 pub const SOURCE_LINK: &str = "https://github.com/4imothy/digitrek";

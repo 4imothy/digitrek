@@ -10,7 +10,7 @@ rand = "0.10.1"
 serde = "1.0.228"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-open = "5.3.3"
+open = "5.3.4"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2.118"

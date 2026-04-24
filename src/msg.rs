@@ -35,22 +35,23 @@ pub fn on_msg(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut msg: MessageReader<GameMsg>,
-    enemies: Query<(&Foe, &Transform), Without<ToDespawn>>,
+    foes: Query<(&Foe, &Transform), Without<ToDespawn>>,
     player: Single<&Transform, With<Player>>,
     children_query: Query<&Children>,
-    enemy_text_query: Query<(), With<EnemyText>>,
+    foe_text_query: Query<(), With<FoeText>>,
     local_point_query: Query<(), With<LocalPoint>>,
     mut config: ResMut<Config>,
     stats: Single<&mut Stats>,
     mut pkv: ResMut<PkvStore>,
     window: Single<&Window>,
     shape_assets: Res<ShapeAssets>,
+    explosion_assets: Res<ExplosionAssets>,
 ) {
     let viewport_width = window.width() * VIEWPORT_HEIGHT / window.height();
     for msg in msg.read() {
         match msg {
             GameMsg::Explosion(position) => {
-                spawn_explosion(&mut commands, &mut meshes, &mut materials, position);
+                spawn_explosion(&mut commands, &mut materials, &explosion_assets, position);
             }
             GameMsg::Despawn(entity) => {
                 commands.entity(*entity).insert(ToDespawn);
@@ -58,7 +59,7 @@ pub fn on_msg(
             GameMsg::DespawnText(entity) => {
                 if let Ok(children) = children_query.get(*entity) {
                     for child in children.iter() {
-                        if enemy_text_query.contains(child) {
+                        if foe_text_query.contains(child) {
                             commands.entity(child).try_despawn();
                         }
                     }
@@ -101,17 +102,15 @@ pub fn on_msg(
             }
             GameMsg::AddText(entity) => {
                 let mut cmd = commands.entity(*entity);
-                if let Ok((enemy, _)) = enemies.get(*entity)
-                    && enemy.keys_not_hit() > 0
+                if let Ok((foe, _)) = foes.get(*entity)
+                    && foe.keys_not_hit() > 0
                 {
                     add_text(
                         &mut cmd,
-                        &mut meshes,
-                        &mut materials,
-                        &enemy.keys,
-                        enemy.keys_not_hit(),
-                        enemy.cleared,
-                        enemy.next_index,
+                        &foe.keys,
+                        foe.keys_not_hit(),
+                        foe.cleared,
+                        foe.next_index,
                     );
                 }
             }
@@ -119,7 +118,7 @@ pub fn on_msg(
                 let player_pos = player.translation.xy();
                 let mut closest = [(f32::MAX, ' '); FOE_AVOID_COUNT];
                 let mut count = 0;
-                for (f, t) in enemies.iter() {
+                for (f, t) in foes.iter() {
                     if let Some(key) = f.keys.get(f.next_index).copied().filter(|c| *c != ' ') {
                         let dist = t.translation.xy().distance(player_pos);
                         let pos = closest[..count].partition_point(|(d, _)| *d < dist);
@@ -197,8 +196,8 @@ pub fn on_msg(
 
 fn spawn_explosion(
     commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<ColorMaterial>>,
+    explosion_assets: &Res<ExplosionAssets>,
     loc: &Vec2,
 ) {
     for _ in 0..rand::random_range(15..30) {
@@ -211,11 +210,10 @@ fn spawn_explosion(
             .with_alpha(EXPLOSION_PARTICLE_INITIAL_ALPHA);
 
         let material = materials.add(color);
+        let mesh = explosion_assets.meshes[rand::random_range(0..5)].clone();
 
         commands.spawn((
-            Mesh2d(meshes.add(Circle::new(rand::random_range(
-                EXPLOSION_PARTICLE_RADIUS_LOWER..EXPLOSION_PARTICLE_RADIUS_UPPER,
-            )))),
+            Mesh2d(mesh),
             MeshMaterial2d(material.clone()),
             Transform::from_translation(loc.extend(rand::random_range(
                 EXPLOSION_Z_INDEX - EXPLOSION_Z_INDEX_RANGE
@@ -240,45 +238,28 @@ fn text_color(i: usize, next: usize) -> TextColor {
     })
 }
 
-fn add_text(
-    cmd: &mut EntityCommands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<ColorMaterial>>,
-    keys: &[char],
-    to_show: usize,
-    cleared: usize,
-    next: usize,
-) {
-    let bg_width = to_show as f32 * FOE_WORD_BG_CHAR_WIDTH + FOE_WORD_BG_PADDING * 2.;
-    let bg_height = FOE_FONT_SIZE + FOE_WORD_BG_PADDING * 2.;
-    let bg_mesh = meshes.add(Rectangle::new(bg_width, bg_height));
-    let bg_mat = materials.add(colors::FOE_WORD_BG);
+fn add_text(cmd: &mut EntityCommands, keys: &[char], to_show: usize, cleared: usize, next: usize) {
+    let bg = TextBackgroundColor(colors::FOE_WORD_BG);
+    let pad = TextColor(Color::NONE);
     cmd.with_children(|c| {
-        c.spawn((
-            Mesh2d(bg_mesh),
-            MeshMaterial2d(bg_mat),
-            Transform::from_xyz(0., 0., 0.1),
-            EnemyText,
-            NoFrustumCulling,
-        ));
         let font = foe_font();
-        let mut iter = keys.iter().enumerate().skip(cleared).take(to_show);
-        if let Some((i, &ch)) = iter.next() {
-            c.spawn((
-                Text2d::new(ch),
-                TextLayout::default(),
-                Transform::from_xyz(0., 0., 0.2),
-                font.clone(),
-                text_color(i, next),
-                EnemyText,
-                NoFrustumCulling,
-            ))
-            .with_children(|c| {
-                for (i, &ch) in iter {
-                    c.spawn((TextSpan::new(ch), text_color(i, next), font.clone()));
-                }
-            });
-        }
+        let iter = keys.iter().enumerate().skip(cleared).take(to_show);
+        c.spawn((
+            Text2d::new(" "),
+            TextLayout::default(),
+            Transform::from_xyz(0., 0., 0.1),
+            font.clone(),
+            pad,
+            bg,
+            FoeText,
+            NoFrustumCulling,
+        ))
+        .with_children(|c| {
+            for (i, &ch) in iter {
+                c.spawn((TextSpan::new(ch), text_color(i, next), font.clone(), bg));
+            }
+            c.spawn((TextSpan::new(" "), pad, font.clone(), bg));
+        });
     });
 }
 
@@ -447,7 +428,7 @@ fn spawn_foe(
             );
         }
     }
-    add_text(&mut ent_cmds, meshes, materials, &keys, num_keys, 0, 0);
+    add_text(&mut ent_cmds, &keys, num_keys, 0, 0);
     let e = Foe::new(shape, keys, num_keys, spawned_by);
     ent_cmds.insert(e);
 

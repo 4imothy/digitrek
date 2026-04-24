@@ -2,7 +2,6 @@
 
 use crate::*;
 use bevy::{
-    camera::visibility::NoFrustumCulling,
     input::{
         ButtonState,
         keyboard::{Key, KeyboardInput},
@@ -12,7 +11,7 @@ use bevy::{
 };
 use rand::{self, distr::Distribution};
 use std::{
-    f32::consts::{FRAC_PI_2, TAU},
+    f32::consts::{FRAC_PI_2, PI, TAU},
     sync::Arc,
 };
 
@@ -111,7 +110,6 @@ pub fn setup(
                     ))),
                     MeshMaterial2d(materials.add(colors::INDICATOR)),
                     Transform::from_xyz(0., SELECTION_ARROW_RADIUS, 0.5),
-                    NoFrustumCulling,
                 ));
             });
             if SHOW_LOCAL_POINTS {
@@ -194,6 +192,9 @@ pub fn setup(
         foe_launch: audio.add(AudioSource {
             bytes: Arc::from(*include_bytes!("../assets/launch.ogg")),
         }),
+        end: audio.add(AudioSource {
+            bytes: Arc::from(*include_bytes!("../assets/end.ogg")),
+        }),
     });
     commands.insert_resource(ShapeAssets {
         meshes: [
@@ -203,6 +204,15 @@ pub fn setup(
             meshes.add(HEXAGON),
         ],
         materials: colors::SHAPE_COLORS.map(|c| materials.add(c)),
+    });
+    commands.insert_resource(ExplosionAssets {
+        meshes: std::array::from_fn(|i| {
+            let t = i as f32 / 4.;
+            meshes.add(Circle::new(
+                EXPLOSION_PARTICLE_RADIUS_LOWER
+                    + t * (EXPLOSION_PARTICLE_RADIUS_UPPER - EXPLOSION_PARTICLE_RADIUS_LOWER),
+            ))
+        }),
     });
     commands.insert_resource(Clock(0.));
 }
@@ -285,11 +295,16 @@ impl Foe {
         normal: Vec2,
         viewport_width: f32,
         center: Vec2,
+        transform: &mut Transform,
     ) {
         self.colliding = true;
         if let Some(shape) = self.shape.downgraded_shape() {
+            let old_leading = self.leading_dir;
             self.shape = shape;
             self.leading_dir = shape.vertex_dirs()[0];
+            if old_leading.dot(self.leading_dir) < 0. {
+                transform.rotation *= Quat::from_rotation_z(PI);
+            }
             self.skipped += 1;
             if self.cleared + self.skipped >= self.orig_len {
                 explosion_in_viewport(pos, viewport_width, center, msg, audio);
@@ -379,7 +394,7 @@ pub fn keypress(
     mut color_materials: ResMut<Assets<ColorMaterial>>,
     indicator: Single<Entity, (With<Indicator>, Without<Player>)>,
     arrow_pivot: Single<Entity, (With<SelectionArrowPivot>, Without<Player>)>,
-    mut enemy_query: Query<
+    mut foe_query: Query<
         (Entity, &mut Foe, &mut Transform),
         (Without<Player>, Without<Indicator>, Without<PlayerLauncher>),
     >,
@@ -440,23 +455,23 @@ pub fn keypress(
             Key::Character(str) if *mode == Mode::Typing => {
                 if let Some(key) = str.chars().next().map(|c| c.to_ascii_lowercase()) {
                     if let Some(selected) = player.selected
-                        && let Ok((selected_entity, mut selected_enemy, selected_transform)) =
-                            enemy_query.get_mut(selected)
+                        && let Ok((selected_entity, mut selected_foe, selected_transform)) =
+                            foe_query.get_mut(selected)
                     {
                         found_selected = true;
-                        if key == selected_enemy.keys[selected_enemy.next_index] {
+                        if key == selected_foe.keys[selected_foe.next_index] {
                             point_launcher(
                                 player_transform,
                                 &mut launcher_transform,
                                 &selected_transform,
                             );
                             fuel.0 = (fuel.0 + FUEL_PER_KEY).min(1.);
-                            selected_enemy.next_index += 1;
+                            selected_foe.next_index += 1;
                             msg.write(GameMsg::Projectile(
                                 selected_entity,
                                 projectile_spawn_location(player_transform, &launcher_transform),
                             ));
-                            if selected_enemy.keys_to_type() == 0 {
+                            if selected_foe.keys_to_type() == 0 {
                                 msg.write(GameMsg::Invisible(*indicator));
                                 msg.write(GameMsg::Invisible(*arrow_pivot));
                                 player.selection_active = false;
@@ -473,28 +488,28 @@ pub fn keypress(
                         player.selected = None;
                         let mut closest_distance = f32::MAX;
                         let mut closest_entity = None;
-                        let mut closest_enemy = None;
-                        let mut closest_enemy_transform = None;
+                        let mut closest_foe = None;
+                        let mut closest_foe_transform = None;
 
-                        for (entity, enemy, enemy_transform) in enemy_query.iter_mut() {
-                            if enemy.next_index < enemy.orig_len
-                                && enemy.entered_viewport
-                                && key == enemy.keys[enemy.next_index]
+                        for (entity, foe, foe_transform) in foe_query.iter_mut() {
+                            if foe.next_index < foe.orig_len
+                                && foe.entered_viewport
+                                && key == foe.keys[foe.next_index]
                             {
                                 let distance = player_transform
                                     .translation
-                                    .distance(enemy_transform.translation);
+                                    .distance(foe_transform.translation);
                                 if distance < closest_distance {
                                     closest_distance = distance;
                                     closest_entity = Some(entity);
-                                    closest_enemy = Some(enemy);
-                                    closest_enemy_transform = Some(enemy_transform);
+                                    closest_foe = Some(foe);
+                                    closest_foe_transform = Some(foe_transform);
                                 }
                             }
                         }
 
                         if let Some(e) = closest_entity {
-                            let mut ce = closest_enemy.unwrap();
+                            let mut ce = closest_foe.unwrap();
                             if ce.keys_to_type() > 1 {
                                 player.selected = closest_entity;
                                 msg.write(GameMsg::Select(e));
@@ -502,7 +517,7 @@ pub fn keypress(
                             point_launcher(
                                 player_transform,
                                 &mut launcher_transform,
-                                &closest_enemy_transform.unwrap(),
+                                &closest_foe_transform.unwrap(),
                             );
 
                             fuel.0 = (fuel.0 + FUEL_PER_KEY).min(1.);
@@ -727,7 +742,7 @@ pub fn launcher_foe(
         let to_target = target - pos;
         let dist = to_target.length();
 
-        if dist < foe.mov_speed() * dt {
+        if dist == 0. || dist < foe.mov_speed() * dt {
             transform.translation.x = target.x;
             transform.translation.y = target.y;
         } else {
@@ -953,7 +968,7 @@ pub fn projectile(
     let (mut stats, mut score_text) = stats.into_inner();
     let mut score_change = false;
     for (projectile_entity, projectile, mut projectile_transform) in &mut projectiles_query {
-        if let Ok((target_entity, mut targeted_enemy, target_transform, summoner, launcher_foe)) =
+        if let Ok((target_entity, mut targeted_foe, target_transform, summoner, launcher_foe)) =
             enemies_query.get_mut(projectile.target)
         {
             let Some(e_points) = cache.0.get(&target_entity) else {
@@ -980,16 +995,16 @@ pub fn projectile(
                     f.since = (f.since - PROJECTILE_INC_TIME).max(0.);
                 }
                 msg.write(GameMsg::Despawn(projectile_entity));
-                if targeted_enemy.keys_not_hit() <= 1 {
+                if targeted_foe.keys_not_hit() <= 1 {
                     msg.write(GameMsg::Explosion(target_transform.translation.xy()));
                     audio.write(AudioMsg::Explosion);
                     msg.write(GameMsg::Despawn(target_entity));
 
-                    stats.inc_score(targeted_enemy.num_points());
+                    stats.inc_score(targeted_foe.num_points());
                     score_change = true;
                 } else {
                     msg.write(GameMsg::DespawnText(target_entity));
-                    targeted_enemy.cleared += 1;
+                    targeted_foe.cleared += 1;
                     msg.write(GameMsg::AddText(target_entity));
                 }
             }
@@ -1168,10 +1183,10 @@ pub fn update_spawned_relations(
     }
 }
 
-pub fn enemy_collisions(
+pub fn foe_collsions(
     mut msg: MessageWriter<GameMsg>,
     mut audio: MessageWriter<AudioMsg>,
-    mut query: Query<(Entity, &mut Foe, &Transform), Without<Player>>,
+    mut query: Query<(Entity, &mut Foe, &mut Transform), Without<Player>>,
     stats: Single<(&mut Stats, &mut Text)>,
     window: Single<&Window>,
     cache: Res<FoePointsCache>,
@@ -1185,8 +1200,8 @@ pub fn enemy_collisions(
 
     while let Some(
         [
-            (entity_a, mut enemy_a, transform_a),
-            (entity_b, mut enemy_b, transform_b),
+            (entity_a, mut foe_a, mut transform_a),
+            (entity_b, mut foe_b, mut transform_b),
         ],
     ) = iter.fetch_next()
     {
@@ -1195,12 +1210,12 @@ pub fn enemy_collisions(
             continue;
         };
 
-        if enemy_a.spawned_by != Some(entity_b)
-            && enemy_b.spawned_by != Some(entity_a)
+        if foe_a.spawned_by != Some(entity_b)
+            && foe_b.spawned_by != Some(entity_a)
             && let Some((normal, a_to_b)) = collide(points_a.as_slice(), points_b.as_slice(), None)
         {
-            if !enemy_a.colliding {
-                enemy_a.collision(
+            if !foe_a.colliding {
+                foe_a.collision(
                     &mut msg,
                     &mut audio,
                     entity_a,
@@ -1208,10 +1223,11 @@ pub fn enemy_collisions(
                     if a_to_b { -normal } else { normal },
                     viewport_width,
                     player_pos,
+                    &mut transform_a,
                 );
             }
-            if !enemy_b.colliding {
-                enemy_b.collision(
+            if !foe_b.colliding {
+                foe_b.collision(
                     &mut msg,
                     &mut audio,
                     entity_b,
@@ -1219,6 +1235,7 @@ pub fn enemy_collisions(
                     if a_to_b { normal } else { -normal },
                     viewport_width,
                     player_pos,
+                    &mut transform_b,
                 );
             }
             if in_viewport(
@@ -1285,13 +1302,13 @@ pub fn player_collisions(
 
     let mut hit = false;
     let mut contact = player_transform.translation.xy();
-    for (entity, mut e, enemy_transform) in enemies.iter_mut() {
+    for (entity, mut e, foe_transform) in enemies.iter_mut() {
         let Some(points) = cache.0.get(&entity) else {
             continue;
         };
         if let Some((normal, a_to_b)) = collide(points.as_slice(), &player_points, None) {
             if !hit {
-                let ep = enemy_transform.translation.xy();
+                let ep = foe_transform.translation.xy();
                 contact = player_points
                     .iter()
                     .min_by(|a, b| {
@@ -1335,7 +1352,7 @@ pub fn player_collisions(
 
     if hit && !INVINCIBLE {
         msg.write(GameMsg::Explosion(contact));
-        audio.write(AudioMsg::Explosion);
+        audio.write(AudioMsg::End);
         msg.write(GameMsg::Invisible(player_entity));
         msg.write(GameMsg::Invisible(*indicator));
         msg.write(GameMsg::Invisible(*arrow_pivot));
@@ -1415,7 +1432,7 @@ pub fn reset_collisions(mut enemies: Query<&mut Foe>, mut obstacles: Query<&mut 
     }
 }
 
-pub fn track_selected_enemy(
+pub fn track_selected_foe(
     indicator: Single<
         (Entity, &mut Transform),
         (
@@ -1481,7 +1498,7 @@ pub fn track_selected_enemy(
 }
 
 pub fn obstacle_collisions(
-    mut enemies: Query<(Entity, &mut Foe, &Transform), (Without<Obstacle>, Without<Player>)>,
+    mut enemies: Query<(Entity, &mut Foe, &mut Transform), (Without<Obstacle>, Without<Player>)>,
     mut obstacles: Query<(&mut Obstacle, &Transform), Without<Foe>>,
     mut msg: MessageWriter<GameMsg>,
     mut audio: MessageWriter<AudioMsg>,
@@ -1493,7 +1510,7 @@ pub fn obstacle_collisions(
     let player_pos = player.translation.xy();
 
     for (_, o_transform) in &obstacles {
-        for (e_ent, mut e, e_transform) in enemies.iter_mut() {
+        for (e_ent, mut e, mut e_transform) in enemies.iter_mut() {
             let Some(e_points) = cache.0.get(&e_ent) else {
                 continue;
             };
@@ -1504,14 +1521,16 @@ pub fn obstacle_collisions(
                     e_points.as_slice(),
                 )
             {
+                let pos = e_transform.translation;
                 e.collision(
                     &mut msg,
                     &mut audio,
                     e_ent,
-                    e_transform.translation,
+                    pos,
                     -normal,
                     viewport_width,
                     player_pos,
+                    &mut e_transform,
                 );
             }
         }
@@ -1526,7 +1545,7 @@ pub fn obstacle_collisions(
             b.colliding = true;
             let a_to_b = (b_transform.translation - a_transform.translation)
                 .xy()
-                .normalize();
+                .normalize_or_zero();
             let new_speed_a = (a.velocity.length() / 2.).max(OBSTACLE_MOVEMENT_SPEED / 4.);
             let new_speed_b = (b.velocity.length() / 2.).max(OBSTACLE_MOVEMENT_SPEED / 4.);
             a.velocity = -a_to_b * new_speed_a;
@@ -1670,24 +1689,14 @@ pub fn update_countdown_indicators(
     }
 }
 
-pub fn lock_enemy_text(
-    mut text_query: Query<(&mut Transform, &ChildOf), (With<EnemyText>, Without<Foe>)>,
-    enemy_query: Query<&Transform, (With<Foe>, Without<EnemyText>)>,
+pub fn lock_foe_text(
+    mut text_query: Query<(&mut Transform, &ChildOf), (With<FoeText>, Without<Foe>)>,
+    foe_query: Query<&Transform, (With<Foe>, Without<FoeText>)>,
 ) {
     for (mut text_transform, child_of) in text_query.iter_mut() {
-        if let Ok(enemy_transform) = enemy_query.get(child_of.parent()) {
-            text_transform.rotation = enemy_transform.rotation.inverse();
+        if let Ok(foe_transform) = foe_query.get(child_of.parent()) {
+            text_transform.rotation = foe_transform.rotation.inverse();
         }
-    }
-}
-
-pub fn lock_launcher_ring(
-    player: Single<&GlobalTransform, With<Player>>,
-    mut ring: Query<&mut Transform, (With<LauncherRing>, Without<Player>)>,
-) {
-    let (_, rotation, _) = player.to_scale_rotation_translation();
-    for mut t in ring.iter_mut() {
-        t.rotation = rotation.inverse();
     }
 }
 

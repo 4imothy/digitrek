@@ -1,14 +1,18 @@
 #!/usr/bin/env sh
 
-if [[ "$1" == "alter" ]]; then
-    ffmpeg -i "$2" -filter:a "volume=${4}dB" "$3"
-elif [[ "$1" == "normalize" ]]; then
-    ffmpeg -i "$2" -filter:a "dynaudnorm=f=150:g=5" "$3"
-elif [[ "$1" == "analyze" ]]; then
-    ffmpeg -i "$2" -af volumedetect -f null /dev/null
-elif [[ "$1" == "convert" ]]; then
-    ffmpeg -i "$2" -acodec libvorbis "$3"
+generate() {
+    csound -o "assets/$1.wav" "assets/$1.csd" && \
+    ffmpeg -y -i "assets/$1.wav" -acodec libvorbis -map_metadata -1 -fflags +bitexact "assets/$1.ogg" && \
+    rm "assets/$1.wav" && \
+    afplay "assets/$1.ogg"
+}
+
+if [ "$1" = "all" ]; then
+    for csd in assets/*.csd; do
+        name="${csd#assets/}"
+        name="${name%.csd}"
+        generate "$name"
+    done
 else
-    echo "invalid input"
-    exit 1
+    generate "$1"
 fi

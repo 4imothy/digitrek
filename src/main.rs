@@ -99,8 +99,6 @@ const PHASE_WEIGHTS: [[f32; NUM_SHAPES]; NUM_PHASE] = [
 const SHAPE_NUM_KEYS: [usize; NUM_SHAPES] = [3, 4, 5, 6];
 const FOE_MAX_NUM_KEYS: usize = *SHAPE_NUM_KEYS.last().unwrap();
 const FOE_FONT_SIZE: f32 = 35.;
-const FOE_WORD_BG_CHAR_WIDTH: f32 = 20.;
-const FOE_WORD_BG_PADDING: f32 = 6.;
 const FOE_AVOID_COUNT: usize = 10;
 const WORD_AVOID_RETRIES: usize = 10;
 const PENTAGON_SUMMON_WEIGHTS: [f32; 1] = [1.0];
@@ -123,18 +121,18 @@ const FUEL_PASSIVE_RATE: f32 = 0.01;
 
 const STAR_Z_INDEX: f32 = -1.;
 
-const TRIANGLE: RegularPolygon = RegularPolygon {
-    circumcircle: Circle {
-        radius: FOE_SIZE / 1.5,
-    },
-    sides: 3,
-};
-const TRIANGLE_CENTERING_OFFSET_Y: f32 = FOE_SIZE / 3.;
 const TRIANGLE_LOCAL_POINTS: [Vec3; 3] = [
-    Vec3::new(0., FOE_SIZE - TRIANGLE_CENTERING_OFFSET_Y, 0.),
-    Vec3::new(FOE_SIZE / 2., -TRIANGLE_CENTERING_OFFSET_Y, 0.),
-    Vec3::new(-FOE_SIZE / 2., -TRIANGLE_CENTERING_OFFSET_Y, 0.),
+    Vec3::new(0., FOE_SIZE / 1.75, 0.),
+    Vec3::new(FOE_SIZE / 2., -FOE_SIZE / 2., 0.),
+    Vec3::new(-FOE_SIZE / 2., -FOE_SIZE / 2., 0.),
 ];
+const TRIANGLE: Triangle2d = Triangle2d {
+    vertices: [
+        Vec2::new(TRIANGLE_LOCAL_POINTS[0].x, TRIANGLE_LOCAL_POINTS[0].y),
+        Vec2::new(TRIANGLE_LOCAL_POINTS[1].x, TRIANGLE_LOCAL_POINTS[1].y),
+        Vec2::new(TRIANGLE_LOCAL_POINTS[2].x, TRIANGLE_LOCAL_POINTS[2].y),
+    ],
+};
 const RHOMBUS_LOCAL_POINTS: [Vec3; 4] = [
     Vec3::new(0., -FOE_SIZE, 0.),
     Vec3::new(FOE_SIZE / 1.5, 0., 0.),
@@ -593,7 +591,7 @@ fn game_plugin(app: &mut App) {
             (
                 game::foe_points,
                 (
-                    game::enemy_collisions,
+                    game::foe_collsions,
                     game::update_spawned_relations,
                     game::player_collisions,
                     game::obstacle_collisions,
@@ -609,7 +607,7 @@ fn game_plugin(app: &mut App) {
             (
                 game::camera_follow,
                 game::player_movement,
-                game::track_selected_enemy.after(game::player_movement),
+                game::track_selected_foe.after(game::player_movement),
                 game::keypress,
                 game::slowdown_time,
                 game::projectile,
@@ -643,10 +641,9 @@ fn game_plugin(app: &mut App) {
                 msg::on_audio,
                 game::reset_collisions.after(msg::on_msg),
                 game::despawner.after(msg::on_msg),
-                game::lock_enemy_text
+                game::lock_foe_text
                     .after(msg::on_msg)
                     .before(TransformSystems::Propagate),
-                game::lock_launcher_ring.after(TransformSystems::Propagate),
             )
                 .run_if(in_state(Screen::Game)),
         )
@@ -785,7 +782,7 @@ struct FoeLauncher {
 struct CountdownIndicator;
 
 #[derive(Component)]
-struct EnemyText;
+struct FoeText;
 
 #[derive(Component)]
 struct Targeted;
@@ -830,12 +827,18 @@ struct AudioAssets {
     pub unmatched_keypress: Handle<AudioSource>,
     pub explosion: Handle<AudioSource>,
     pub foe_launch: Handle<AudioSource>,
+    pub end: Handle<AudioSource>,
 }
 
 #[derive(Resource)]
 struct ShapeAssets {
     meshes: [Handle<Mesh>; NUM_SHAPES],
     materials: [Handle<ColorMaterial>; NUM_SHAPES],
+}
+
+#[derive(Resource)]
+pub struct ExplosionAssets {
+    pub meshes: [Handle<Mesh>; 5],
 }
 
 pub fn text_font() -> TextFont {
@@ -859,6 +862,7 @@ pub enum AudioMsg {
     Explosion,
     UnmatchedKeypress,
     FoeLaunch,
+    End,
 }
 
 impl AudioMsg {
@@ -867,6 +871,7 @@ impl AudioMsg {
             AudioMsg::Explosion => sounds.explosion.clone(),
             AudioMsg::UnmatchedKeypress => sounds.unmatched_keypress.clone(),
             AudioMsg::FoeLaunch => sounds.foe_launch.clone(),
+            AudioMsg::End => sounds.end.clone(),
         }
     }
 }

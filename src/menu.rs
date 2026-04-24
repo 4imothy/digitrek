@@ -22,7 +22,7 @@ pub enum Label {
     SpaceGrotesk,
     FontForge,
     FFmpeg,
-    Bfxr,
+    Csound,
     Source,
     Wordfreq,
     GWordList,
@@ -50,7 +50,7 @@ impl Label {
             Label::GameEngine => credits::GAME_ENGINE_LINK,
             Label::Palette => credits::PALETTE_LINK,
             Label::SpaceGrotesk => credits::SPACE_GROTESK_LINK,
-            Label::Bfxr => credits::BFXR_LINK,
+            Label::Csound => credits::CSOUND_LINK,
             Label::FontForge => credits::FONTFORGE_LINK,
             Label::FFmpeg => credits::FFMPEG_LINK,
             Label::Source => credits::SOURCE_LINK,
@@ -317,7 +317,7 @@ fn do_action(
         | Label::SpaceGrotesk
         | Label::FontForge
         | Label::FFmpeg
-        | Label::Bfxr
+        | Label::Csound
         | Label::Source
         | Label::Wordfreq
         | Label::GWordList => {
@@ -700,7 +700,13 @@ pub fn credits_setup(mut commands: Commands) {
                                 ..default()
                             },
                         ));
-                        spawn_button(col, Label::Bfxr, credits::BFXR_TEXT, false, font.clone());
+                        spawn_button(
+                            col,
+                            Label::Csound,
+                            credits::CSOUND_TEXT,
+                            false,
+                            font.clone(),
+                        );
                         spawn_button(
                             col,
                             Label::FontForge,
@@ -862,7 +868,7 @@ pub fn keypress_navigate(
     };
 
     let next_selection = match (selected_label, v_dir, h_dir) {
-        (Label::ProgrammingLanguage, _, 1) => Some(Label::Bfxr),
+        (Label::ProgrammingLanguage, _, 1) => Some(Label::Csound),
         (Label::GameEngine, _, 1) => Some(Label::FontForge),
         (Label::FontForge, _, -1) => Some(Label::GameEngine),
         (Label::Source, _, 1) => Some(Label::Wordfreq),
@@ -871,7 +877,7 @@ pub fn keypress_navigate(
         (Label::GWordList, _, -1) => Some(Label::SpaceGrotesk),
         (Label::Palette, _, 1) => Some(Label::FFmpeg),
         (Label::FFmpeg, _, -1) => Some(Label::Palette),
-        (Label::Bfxr, _, -1) => Some(Label::ProgrammingLanguage),
+        (Label::Csound, _, -1) => Some(Label::ProgrammingLanguage),
         (Label::Play, 1, _) => Some(Label::Help),
         (Label::Play, -1, _) => {
             if cfg!(target_arch = "wasm32") {
@@ -918,10 +924,10 @@ pub fn keypress_navigate(
         (Label::SpaceGrotesk, -1, _) => Some(Label::Source),
         (Label::Palette, 1, _) => Some(Label::Back),
         (Label::Palette, -1, _) => Some(Label::SpaceGrotesk),
-        (Label::Bfxr, 1, _) => Some(Label::FontForge),
-        (Label::Bfxr, -1, _) => Some(Label::Back),
+        (Label::Csound, 1, _) => Some(Label::FontForge),
+        (Label::Csound, -1, _) => Some(Label::Back),
         (Label::FontForge, 1, _) => Some(Label::Wordfreq),
-        (Label::FontForge, -1, _) => Some(Label::Bfxr),
+        (Label::FontForge, -1, _) => Some(Label::Csound),
         (Label::Wordfreq, 1, _) => Some(Label::GWordList),
         (Label::Wordfreq, -1, _) => Some(Label::FontForge),
         (Label::GWordList, 1, _) => Some(Label::FFmpeg),
@@ -1062,12 +1068,13 @@ pub fn resume_countdown(
     let (mut c, mut t) = countdown.into_inner();
     c.counter -= rtime.delta_secs();
     if c.counter < (c.displayed - 1) as f32 {
-        c.displayed = c.displayed.saturating_sub(1);
-        **t = c.displayed.to_string();
-    }
-    if c.displayed == 0 {
-        next_screen.set(GameScreen::Running);
-        vtime.unpause();
+        if c.displayed <= 1 {
+            next_screen.set(GameScreen::Running);
+            vtime.unpause();
+        } else {
+            c.displayed -= 1;
+            **t = c.displayed.to_string();
+        }
     }
 }
 
