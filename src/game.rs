@@ -236,15 +236,6 @@ impl Shape {
         }
     }
 
-    pub fn downgraded_shape(&self) -> Option<Self> {
-        match self {
-            Shape::Triangle => None,
-            Shape::Rhombus => Some(Shape::Triangle),
-            Shape::Pentagon => Some(Shape::Rhombus),
-            Shape::Hexagon => Some(Shape::Pentagon),
-        }
-    }
-
     pub fn local_points(&self) -> &[Vec3] {
         match self {
             Shape::Triangle => &TRIANGLE_LOCAL_POINTS,
@@ -295,36 +286,16 @@ impl Foe {
         normal: Vec2,
         viewport_width: f32,
         center: Vec2,
-        transform: &mut Transform,
     ) {
         self.colliding = true;
-        if let Some(shape) = self.shape.downgraded_shape() {
-            let old_leading = self.leading_dir;
-            self.shape = shape;
-            self.leading_dir = shape.vertex_dirs()[0];
-            if old_leading.dot(self.leading_dir) < 0. {
-                transform.rotation *= Quat::from_rotation_z(PI);
-            }
-            self.skipped += 1;
-            if self.cleared + self.skipped >= self.orig_len {
-                explosion_in_viewport(pos, viewport_width, center, msg, audio);
-                msg.write(GameMsg::Despawn(entity));
-            } else {
-                self.add_collision(normal);
-                match shape {
-                    Shape::Pentagon | Shape::Rhombus => {
-                        msg.write(GameMsg::DespawnChildren(entity));
-                    }
-                    _ => {
-                        msg.write(GameMsg::DespawnText(entity));
-                    }
-                }
-                msg.write(GameMsg::ReplaceShape(entity, shape));
-                msg.write(GameMsg::AddText(entity));
-            }
-        } else {
+        self.skipped += 1;
+        if self.cleared + self.skipped >= self.orig_len {
             explosion_in_viewport(pos, viewport_width, center, msg, audio);
             msg.write(GameMsg::Despawn(entity));
+        } else {
+            self.add_collision(normal);
+            msg.write(GameMsg::DespawnText(entity));
+            msg.write(GameMsg::AddText(entity));
         }
     }
 
@@ -1186,7 +1157,7 @@ pub fn update_spawned_relations(
 pub fn foe_collsions(
     mut msg: MessageWriter<GameMsg>,
     mut audio: MessageWriter<AudioMsg>,
-    mut query: Query<(Entity, &mut Foe, &mut Transform), Without<Player>>,
+    mut query: Query<(Entity, &mut Foe, &Transform), Without<Player>>,
     stats: Single<(&mut Stats, &mut Text)>,
     window: Single<&Window>,
     cache: Res<FoePointsCache>,
@@ -1200,8 +1171,8 @@ pub fn foe_collsions(
 
     while let Some(
         [
-            (entity_a, mut foe_a, mut transform_a),
-            (entity_b, mut foe_b, mut transform_b),
+            (entity_a, mut foe_a, transform_a),
+            (entity_b, mut foe_b, transform_b),
         ],
     ) = iter.fetch_next()
     {
@@ -1223,7 +1194,6 @@ pub fn foe_collsions(
                     if a_to_b { -normal } else { normal },
                     viewport_width,
                     player_pos,
-                    &mut transform_a,
                 );
             }
             if !foe_b.colliding {
@@ -1235,7 +1205,6 @@ pub fn foe_collsions(
                     if a_to_b { normal } else { -normal },
                     viewport_width,
                     player_pos,
-                    &mut transform_b,
                 );
             }
             if in_viewport(
@@ -1509,8 +1478,8 @@ pub fn obstacle_collisions(
     let viewport_width = viewport_width(&window);
     let player_pos = player.translation.xy();
 
-    for (_, o_transform) in &obstacles {
-        for (e_ent, mut e, mut e_transform) in enemies.iter_mut() {
+    for (mut o, o_transform) in &mut obstacles {
+        for (e_ent, mut e, e_transform) in enemies.iter_mut() {
             let Some(e_points) = cache.0.get(&e_ent) else {
                 continue;
             };
@@ -1522,6 +1491,7 @@ pub fn obstacle_collisions(
                 )
             {
                 let pos = e_transform.translation;
+                o.velocity = normal * (o.velocity.length() / 2.).max(OBSTACLE_MIN_SPEED);
                 e.collision(
                     &mut msg,
                     &mut audio,
@@ -1530,7 +1500,6 @@ pub fn obstacle_collisions(
                     -normal,
                     viewport_width,
                     player_pos,
-                    &mut e_transform,
                 );
             }
         }
@@ -1546,8 +1515,8 @@ pub fn obstacle_collisions(
             let a_to_b = (b_transform.translation - a_transform.translation)
                 .xy()
                 .normalize_or_zero();
-            let new_speed_a = (a.velocity.length() / 2.).max(OBSTACLE_MOVEMENT_SPEED / 4.);
-            let new_speed_b = (b.velocity.length() / 2.).max(OBSTACLE_MOVEMENT_SPEED / 4.);
+            let new_speed_a = (a.velocity.length() / 2.).max(OBSTACLE_MIN_SPEED);
+            let new_speed_b = (b.velocity.length() / 2.).max(OBSTACLE_MIN_SPEED);
             a.velocity = -a_to_b * new_speed_a;
             b.velocity = a_to_b * new_speed_b;
         }

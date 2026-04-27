@@ -66,6 +66,7 @@ const SHAPE_ROT_SPEEDS: [f32; NUM_SHAPES] = [
 ];
 const PROJECTILE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED * 4.;
 const OBSTACLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 3.;
+const OBSTACLE_MIN_SPEED: f32 = OBSTACLE_MOVEMENT_SPEED / 4.;
 const KNOCKBACK_DECAY: f32 = 5.;
 const KNOCKBACK_MULTIPLIER: f32 = 1.5;
 const KNOCKBACK_STOP_SPEED: f32 = 15.;
@@ -710,8 +711,6 @@ enum GameMsg {
     Explosion(Vec2),
     Despawn(Entity),
     DespawnText(Entity),
-    DespawnChildren(Entity),
-    ReplaceShape(Entity, Shape),
     AddText(Entity),
     SpawnFoe(Shape, Vec2, Option<Entity>, Option<f32>),
     SpawnObstacle(Vec2, Vec2),

@@ -39,7 +39,6 @@ pub fn on_msg(
     player: Single<&Transform, With<Player>>,
     children_query: Query<&Children>,
     foe_text_query: Query<(), With<FoeText>>,
-    local_point_query: Query<(), With<LocalPoint>>,
     mut config: ResMut<Config>,
     stats: Single<&mut Stats>,
     mut pkv: ResMut<PkvStore>,
@@ -64,41 +63,6 @@ pub fn on_msg(
                         }
                     }
                 }
-            }
-            GameMsg::DespawnChildren(entity) => {
-                commands.entity(*entity).despawn_related::<Children>();
-            }
-            GameMsg::ReplaceShape(entity, shape) => {
-                if SHOW_LOCAL_POINTS {
-                    if let Ok(children) = children_query.get(*entity) {
-                        for child in children.iter() {
-                            if local_point_query.contains(child) {
-                                commands.entity(child).try_despawn();
-                            }
-                        }
-                    }
-                    let points = shape.local_points();
-                    let circle_mesh = meshes.add(Circle::new(10.));
-                    let circle_material = materials.add(Color::WHITE);
-                    commands.entity(*entity).with_children(|cmd| {
-                        for p in points {
-                            cmd.spawn((
-                                Mesh2d(circle_mesh.clone()),
-                                MeshMaterial2d(circle_material.clone()),
-                                Transform::from_xyz(p.x, p.y, PLAYER_Z_INDEX),
-                                LocalPoint,
-                            ));
-                        }
-                    });
-                }
-                replace_shape(
-                    &mut commands,
-                    &mut meshes,
-                    &mut materials,
-                    *entity,
-                    shape,
-                    &shape_assets,
-                );
             }
             GameMsg::AddText(entity) => {
                 let mut cmd = commands.entity(*entity);
@@ -449,43 +413,6 @@ fn spawn_foe(
             }
         });
     }
-}
-
-fn replace_shape(
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<ColorMaterial>>,
-    entity: Entity,
-    shape: &Shape,
-    shape_assets: &ShapeAssets,
-) {
-    let color = shape_assets.materials[shape.id()].clone();
-    let mesh = shape_assets.meshes[shape.id()].clone();
-    let mut ent_cmds = commands.entity(entity);
-    match shape {
-        Shape::Rhombus => {
-            ent_cmds.remove::<Summoner>();
-            ent_cmds.insert(Tracking);
-        }
-        Shape::Pentagon => {
-            ent_cmds.remove::<Launcher>();
-            ent_cmds.insert(Summoner {
-                since: 0.,
-                delay: PENTAGON_SPAWN_DELAY,
-                foe_dist: WeightedIndex::new(PENTAGON_SUMMON_WEIGHTS).unwrap(),
-            });
-            add_foe_launcher(
-                &mut ent_cmds,
-                meshes,
-                materials,
-                PENTAGON_LAUNCHER_LENGTH,
-                PENTAGON_LAUNCHER_WIDTH,
-                5,
-            );
-        }
-        _ => {}
-    }
-    ent_cmds.insert(MeshMaterial2d(color)).insert(Mesh2d(mesh));
 }
 
 pub fn on_audio(

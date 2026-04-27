@@ -394,8 +394,7 @@ pub fn resume_countdown_setup(mut commands: Commands) {
         Node {
             justify_self: JustifySelf::Center,
             align_self: AlignSelf::Center,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
+            margin: UiRect::bottom(Val::Px(PLAYER_RADIUS * 2.)),
             padding: UiRect::new(
                 Val::Percent(1.),
                 Val::Percent(1.),
@@ -408,6 +407,7 @@ pub fn resume_countdown_setup(mut commands: Commands) {
         BackgroundColor(colors::IN_GAME_MENU),
         Text::new((TIME_BEFORE_RESUME as usize).to_string()),
         text_font(),
+        TextColor(colors::BUTTON_TEXT),
         TextLayout::new_with_justify(Justify::Center),
     ));
 }
