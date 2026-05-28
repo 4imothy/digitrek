@@ -71,7 +71,8 @@ const KNOCKBACK_DECAY: f32 = 5.;
 const KNOCKBACK_MULTIPLIER: f32 = 1.5;
 const KNOCKBACK_STOP_SPEED: f32 = 15.;
 const FOE_SEPARATION_RADIUS: f32 = FOE_SIZE * 3.;
-const FOE_SEPARATION_WEIGHT: f32 = 0.5;
+const FOE_SEPARATION_WEIGHT: f32 = 1.5;
+const FOE_SPAWN_RETRY: usize = 5;
 
 const FIRST_FOE_SPAWN_DELAY: f32 = 0.;
 const HEXAGON_LAUNCH_DELAY: f32 = 5.;
@@ -90,11 +91,11 @@ const SHAPES: [Shape; NUM_SHAPES] = [
 const NUM_PHASE: usize = NUM_SHAPES + 1;
 const PHASE_TIME: f32 = 7.;
 const PHASE_WEIGHTS: [[f32; NUM_SHAPES]; NUM_PHASE] = [
-    [1.00, 0.00, 0.00, 0.00],
-    [0.30, 0.70, 0.00, 0.00],
-    [0.25, 0.25, 0.50, 0.00],
-    [0.20, 0.20, 0.25, 0.35],
-    [0.15, 0.20, 0.35, 0.30],
+    [0.50, 0.50, 0.00, 0.00],
+    [0.30, 0.50, 0.20, 0.00],
+    [0.15, 0.30, 0.40, 0.15],
+    [0.10, 0.25, 0.35, 0.30],
+    [0.10, 0.20, 0.35, 0.35],
 ];
 
 const SHAPE_NUM_KEYS: [usize; NUM_SHAPES] = [3, 4, 5, 6];
@@ -592,7 +593,7 @@ fn game_plugin(app: &mut App) {
             (
                 game::foe_points,
                 (
-                    game::foe_collsions,
+                    game::foe_collisions,
                     game::update_spawned_relations,
                     game::player_collisions,
                     game::obstacle_collisions,
@@ -732,7 +733,7 @@ struct Spawner {
     foe_dist: WeightedIndex<f32>,
     foe_delay: f32,
     foe_delay_mu: f32,
-    last_side: usize,
+    next_side: usize,
 }
 
 #[derive(Component)]

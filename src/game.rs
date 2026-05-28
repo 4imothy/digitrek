@@ -180,7 +180,7 @@ pub fn setup(
         foe_dist: WeightedIndex::new(PHASE_WEIGHTS[0]).unwrap(),
         foe_delay: FIRST_FOE_SPAWN_DELAY,
         foe_delay_mu: 0.,
-        last_side: 0,
+        next_side: 0,
     });
     commands.insert_resource(AudioAssets {
         unmatched_keypress: audio.add(AudioSource {
@@ -854,7 +854,8 @@ pub fn tracking_foe(
             let diff = pos - *other_pos;
             let dist = diff.length();
             if dist < FOE_SEPARATION_RADIUS && dist > 0. {
-                sep += diff.normalize() * (1. - dist / FOE_SEPARATION_RADIUS);
+                let t = 1. - dist / FOE_SEPARATION_RADIUS;
+                sep += diff.normalize() * t * t;
             }
         }
         let sep_push = sep.clamp_length_max(1.) * FOE_SEPARATION_WEIGHT;
@@ -1154,7 +1155,7 @@ pub fn update_spawned_relations(
     }
 }
 
-pub fn foe_collsions(
+pub fn foe_collisions(
     mut msg: MessageWriter<GameMsg>,
     mut audio: MessageWriter<AudioMsg>,
     mut query: Query<(Entity, &mut Foe, &Transform), Without<Player>>,
@@ -1185,6 +1186,7 @@ pub fn foe_collsions(
             && foe_b.spawned_by != Some(entity_a)
             && let Some((normal, a_to_b)) = collide(points_a.as_slice(), points_b.as_slice(), None)
         {
+            let new_collision = !foe_a.colliding || !foe_b.colliding;
             if !foe_a.colliding {
                 foe_a.collision(
                     &mut msg,
@@ -1207,17 +1209,20 @@ pub fn foe_collsions(
                     player_pos,
                 );
             }
-            if in_viewport(
-                transform_a.translation,
-                viewport_width,
-                Vec2::ZERO,
-                player_pos,
-            ) && in_viewport(
-                transform_b.translation,
-                viewport_width,
-                Vec2::ZERO,
-                player_pos,
-            ) {
+            if new_collision
+                && in_viewport(
+                    transform_a.translation,
+                    viewport_width,
+                    Vec2::ZERO,
+                    player_pos,
+                )
+                && in_viewport(
+                    transform_b.translation,
+                    viewport_width,
+                    Vec2::ZERO,
+                    player_pos,
+                )
+            {
                 stats.inc_score(1);
                 score_change = true;
             }
@@ -1269,6 +1274,19 @@ pub fn player_collisions(
     let (player_entity, player_transform) = player.into_inner();
     let player_points = PLAYER_LOCAL_TRIANGLE.map(|p| player_transform.transform_point(p));
 
+    let closest_contact = |center: Vec2, fallback: Vec2| {
+        player_points
+            .iter()
+            .min_by(|a, b| {
+                a.xy()
+                    .distance_squared(center)
+                    .partial_cmp(&b.xy().distance_squared(center))
+                    .unwrap()
+            })
+            .map(|v| v.xy())
+            .unwrap_or(fallback)
+    };
+
     let mut hit = false;
     let mut contact = player_transform.translation.xy();
     for (entity, mut e, foe_transform) in enemies.iter_mut() {
@@ -1277,17 +1295,7 @@ pub fn player_collisions(
         };
         if let Some((normal, a_to_b)) = collide(points.as_slice(), &player_points, None) {
             if !hit {
-                let ep = foe_transform.translation.xy();
-                contact = player_points
-                    .iter()
-                    .min_by(|a, b| {
-                        a.xy()
-                            .distance_squared(ep)
-                            .partial_cmp(&b.xy().distance_squared(ep))
-                            .unwrap()
-                    })
-                    .map(|v| v.xy())
-                    .unwrap_or(contact);
+                contact = closest_contact(foe_transform.translation.xy(), contact);
             }
             hit = true;
             e.add_collision(if a_to_b { -normal } else { normal });
@@ -1303,17 +1311,7 @@ pub fn player_collisions(
         .is_some()
         {
             if !hit {
-                let op = o_transform.translation.xy();
-                contact = player_points
-                    .iter()
-                    .min_by(|a, b| {
-                        a.xy()
-                            .distance_squared(op)
-                            .partial_cmp(&b.xy().distance_squared(op))
-                            .unwrap()
-                    })
-                    .map(|v| v.xy())
-                    .unwrap_or(contact);
+                contact = closest_contact(o_transform.translation.xy(), contact);
             }
             hit = true;
         }
@@ -1334,18 +1332,10 @@ fn spawn_location(width: f32, spawner: &mut Spawner) -> Vec2 {
     let w = SPAWN_LOCATION_MULTIPLIER * width / 2.;
     let h = SPAWN_LOCATION_MULTIPLIER * VIEWPORT_HEIGHT / 2.;
 
-    let mut pool = [0; 3];
-    let mut count = 0;
-    for i in 0..4 {
-        if i != spawner.last_side {
-            pool[count] = i;
-            count += 1;
-        }
-    }
+    let side = spawner.next_side;
+    spawner.next_side = (side + 1) % 4;
 
-    spawner.last_side = pool[rand::random_range(0..count)];
-
-    match spawner.last_side {
+    match side {
         0 => Vec2::new(-w, rand::random_range(-h..h)),
         1 => Vec2::new(w, rand::random_range(-h..h)),
         2 => Vec2::new(rand::random_range(-w..w), h),
@@ -1361,7 +1351,7 @@ pub fn spawner(
     window: Single<&Window>,
     config: Res<Config>,
     player: Single<&Transform, With<Player>>,
-    foes: Query<(), With<Foe>>,
+    foes: Query<&Transform, With<Foe>>,
 ) {
     spawner.foe_delay -= time.delta_secs();
 
@@ -1375,15 +1365,19 @@ pub fn spawner(
         spawner.foe_dist = WeightedIndex::new(weights).unwrap();
 
         let width = viewport_width(&window);
+        let player_pos = player.translation.xy();
 
         let shape = SHAPES[spawner.foe_dist.sample(&mut rng)];
 
-        msg.write(GameMsg::SpawnFoe(
-            shape,
-            spawn_location(width, &mut spawner) + player.translation.xy(),
-            None,
-            None,
-        ));
+        let pos = (0..FOE_SPAWN_RETRY)
+            .map(|_| spawn_location(width, &mut spawner) + player_pos)
+            .find(|candidate| {
+                foes.iter()
+                    .all(|t| t.translation.xy().distance(*candidate) >= FOE_SEPARATION_RADIUS)
+            })
+            .unwrap_or_else(|| spawn_location(width, &mut spawner) + player_pos);
+
+        msg.write(GameMsg::SpawnFoe(shape, pos, None, None));
         spawner.foe_delay_mu = spawner_foe_delay_mu(clock.0, config.max_difficulty);
 
         spawner.foe_delay = rand::random_range(
@@ -1491,7 +1485,10 @@ pub fn obstacle_collisions(
                 )
             {
                 let pos = e_transform.translation;
-                o.velocity = normal * (o.velocity.length() / 2.).max(OBSTACLE_MIN_SPEED);
+                if !o.colliding {
+                    o.velocity = normal * (o.velocity.length() / 2.).max(OBSTACLE_MIN_SPEED);
+                    o.colliding = true;
+                }
                 e.collision(
                     &mut msg,
                     &mut audio,
@@ -1591,7 +1588,7 @@ pub fn slowdown_time(
 fn launcher_ring_mesh(inner_r: f32, outer_r: f32, progress: f32) -> Mesh {
     let filled = (RING_RESOLUTIONS as f32 * progress.clamp(0., 1.)).ceil() as usize;
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity((filled + 1) * 2);
-    let mut indices: Vec<u32> = Vec::with_capacity((filled + 1) * 2);
+    let mut indices: Vec<u32> = Vec::with_capacity(filled * 6);
     for i in 0..=filled {
         let t = if i == filled {
             progress
@@ -1602,11 +1599,13 @@ fn launcher_ring_mesh(inner_r: f32, outer_r: f32, progress: f32) -> Mesh {
         let (sin, cos) = theta.sin_cos();
         positions.push([outer_r * cos, outer_r * sin, 0.]);
         positions.push([inner_r * cos, inner_r * sin, 0.]);
-        indices.push((i * 2) as u32);
-        indices.push((i * 2 + 1) as u32);
+    }
+    for i in 0..filled {
+        let b = (i * 2) as u32;
+        indices.extend_from_slice(&[b, b + 1, b + 2, b + 1, b + 2, b + 3]);
     }
     let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleStrip,
+        PrimitiveTopology::TriangleList,
         bevy::asset::RenderAssetUsages::default(),
     );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
@@ -1639,6 +1638,10 @@ pub fn update_launcher_ring(
     }
 }
 
+fn countdown_scale(progress: f32) -> Vec3 {
+    Vec3::splat(COUNTDOWN_START_SCALE - (COUNTDOWN_START_SCALE - 1.0) * progress)
+}
+
 pub fn update_countdown_indicators(
     mut indicators: Query<(&mut Transform, &ChildOf), With<CountdownIndicator>>,
     summoners: Query<&Summoner>,
@@ -1647,13 +1650,9 @@ pub fn update_countdown_indicators(
     for (mut transform, child_of) in &mut indicators {
         let parent = child_of.parent();
         if let Ok(summoner) = summoners.get(parent) {
-            let progress = summoner.since / summoner.delay;
-            transform.scale =
-                Vec3::splat(COUNTDOWN_START_SCALE - (COUNTDOWN_START_SCALE - 1.0) * progress);
+            transform.scale = countdown_scale((summoner.since / summoner.delay).min(1.0));
         } else if let Ok(launcher) = launchers.get(parent) {
-            let progress = (launcher.since / launcher.delay).min(1.0);
-            transform.scale =
-                Vec3::splat(COUNTDOWN_START_SCALE - (COUNTDOWN_START_SCALE - 1.0) * progress);
+            transform.scale = countdown_scale((launcher.since / launcher.delay).min(1.0));
         }
     }
 }

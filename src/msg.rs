@@ -235,27 +235,20 @@ fn add_foe_launcher(
     arm_width: f32,
     countdown_sides: usize,
 ) {
-    let mut arm_mesh = Mesh::new(
-        bevy::render::render_resource::PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
-    );
-    arm_mesh.insert_attribute(
-        Mesh::ATTRIBUTE_POSITION,
-        vec![
-            [0., -arm_width / 2., 0.],
-            [0., arm_width / 2., 0.],
-            [arm_length, -arm_width / 2., 0.],
-            [arm_length, arm_width / 2., 0.],
-        ],
-    );
-    arm_mesh.insert_indices(bevy::mesh::Indices::U32(vec![0, 1, 3, 0, 2, 3]));
+    let mat = materials.add(colors::LAUNCHER);
     ent_cmds.with_children(|cmd| {
         cmd.spawn((
             FoeLauncher { recoil: 0.0 },
-            Mesh2d(meshes.add(arm_mesh)),
-            MeshMaterial2d(materials.add(colors::LAUNCHER)),
             Transform::from_xyz(0., 0., -1.),
-        ));
+            Visibility::Inherited,
+        ))
+        .with_children(|cc| {
+            cc.spawn((
+                Mesh2d(meshes.add(Rectangle::new(arm_length, arm_width))),
+                MeshMaterial2d(mat),
+                Transform::from_xyz(arm_length / 2., 0., 0.),
+            ));
+        });
     });
     let cd_mesh = meshes.add(countdown_outline_mesh(
         countdown_sides,
@@ -278,19 +271,21 @@ fn countdown_outline_mesh(sides: usize, radius: f32, thickness: f32) -> Mesh {
     let inner_radius = radius - thickness / 2.;
     let outer_radius = radius + thickness / 2.;
     let mut positions = Vec::with_capacity((sides + 1) * 2);
-    let mut indices = Vec::with_capacity((sides + 1) * 2);
+    let mut indices = Vec::with_capacity(sides * 6);
 
     for i in 0..=sides {
         let theta = FRAC_PI_2 + i as f32 / sides as f32 * TAU;
         let (sin, cos) = theta.sin_cos();
         positions.push([outer_radius * cos, outer_radius * sin, 0.]);
         positions.push([inner_radius * cos, inner_radius * sin, 0.]);
-        indices.push((i * 2) as u32);
-        indices.push((i * 2 + 1) as u32);
+    }
+    for i in 0..sides {
+        let b = (i * 2) as u32;
+        indices.extend_from_slice(&[b, b + 1, b + 2, b + 1, b + 2, b + 3]);
     }
 
     let mut mesh = Mesh::new(
-        bevy::render::render_resource::PrimitiveTopology::TriangleStrip,
+        bevy::render::render_resource::PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
     );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
