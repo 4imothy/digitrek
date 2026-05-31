@@ -52,6 +52,10 @@ const PENTAGON_LAUNCHER_WIDTH: f32 = FOE_SIZE;
 
 const PLAYER_MOVEMENT_SPEED: f32 = 400.;
 const PLAYER_ROTATION_SPEED: f32 = 4.;
+const PLAYER_DRAG: f32 = 5.0;
+const PLAYER_THRUST: f32 = PLAYER_DRAG * PLAYER_MOVEMENT_SPEED;
+const PLAYER_STOP_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 80.;
+const AUDIO_PADDING: f32 = FOE_SIZE * 2.;
 const SHAPE_MOV_SPEEDS: [f32; NUM_SHAPES] = [
     PLAYER_MOVEMENT_SPEED / 6.,
     PLAYER_MOVEMENT_SPEED / 8.,
@@ -92,10 +96,10 @@ const NUM_PHASE: usize = NUM_SHAPES + 1;
 const PHASE_TIME: f32 = 7.;
 const PHASE_WEIGHTS: [[f32; NUM_SHAPES]; NUM_PHASE] = [
     [0.50, 0.50, 0.00, 0.00],
-    [0.30, 0.50, 0.20, 0.00],
-    [0.15, 0.30, 0.40, 0.15],
-    [0.10, 0.25, 0.35, 0.30],
-    [0.10, 0.20, 0.35, 0.35],
+    [0.35, 0.50, 0.15, 0.00],
+    [0.20, 0.45, 0.25, 0.10],
+    [0.10, 0.45, 0.30, 0.15],
+    [0.10, 0.40, 0.30, 0.20],
 ];
 
 const SHAPE_NUM_KEYS: [usize; NUM_SHAPES] = [3, 4, 5, 6];
@@ -705,6 +709,7 @@ enum GameScreen {
 struct Player {
     selected: Option<Entity>,
     selection_active: bool,
+    velocity: Vec2,
 }
 
 #[derive(Message)]

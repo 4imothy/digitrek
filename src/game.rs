@@ -38,6 +38,7 @@ pub fn setup(
             Player {
                 selected: None,
                 selection_active: false,
+                velocity: Vec2::ZERO,
             },
         ))
         .with_children(|cmds| {
@@ -529,18 +530,18 @@ pub fn player_movement(
     time: Res<Time<Virtual>>,
     key: Res<KeyState>,
     mut fuel: ResMut<Fuel>,
-    mut transform: Single<&mut Transform, With<Player>>,
+    player: Single<(&mut Transform, &mut Player)>,
     stats: Single<&Stats>,
     mode: Res<Mode>,
     mut glow: Single<&mut Visibility, With<EngineGlow>>,
 ) {
+    let (mut transform, mut player) = player.into_inner();
+    let dt = time.delta_secs();
     let has_fuel = fuel.0 > 0.;
-    let moving = stats.running
-        && !time.is_paused()
-        && *mode == Mode::Movement
-        && has_fuel
-        && (key.v.is_some() || key.h.is_some());
-    let want = if moving {
+    let in_movement_mode = stats.running && !time.is_paused() && *mode == Mode::Movement;
+
+    let thrusting = in_movement_mode && has_fuel && key.v.is_some();
+    let want = if thrusting {
         Visibility::Visible
     } else {
         Visibility::Hidden
@@ -548,22 +549,27 @@ pub fn player_movement(
     if **glow != want {
         **glow = want;
     }
-    if stats.running && *mode == Mode::Movement {
+
+    if in_movement_mode {
         let rotation_factor = key.h.map(|v| if v { -1. } else { 1. }).unwrap_or(0.);
         let movement_factor = key.v.map(|v| if v { 1. } else { -1. }).unwrap_or(0.);
 
-        let dt = time.delta_secs();
         transform.rotation *= Quat::from_rotation_z(rotation_factor * PLAYER_ROTATION_SPEED * dt);
 
         if has_fuel && movement_factor != 0. {
-            let movement =
-                movement_factor * (transform.rotation * Vec3::Y) * PLAYER_MOVEMENT_SPEED * dt;
-            transform.translation += movement;
+            let thrust_dir = (transform.rotation * Vec3::Y).xy();
+            player.velocity += thrust_dir * movement_factor * PLAYER_THRUST * dt;
             if !INVINCIBLE {
                 fuel.0 = (fuel.0 - FUEL_DRAIN_RATE * dt).max(0.);
             }
         }
     }
+
+    player.velocity *= (1. - PLAYER_DRAG * dt).max(0.);
+    if player.velocity.length_squared() < PLAYER_STOP_SPEED * PLAYER_STOP_SPEED {
+        player.velocity = Vec2::ZERO;
+    }
+    transform.translation += player.velocity.extend(0.) * dt;
 }
 
 pub fn summoner(
@@ -579,9 +585,12 @@ pub fn summoner(
     mut msg: MessageWriter<GameMsg>,
     mut audio: MessageWriter<AudioMsg>,
     player: Single<&Transform, (With<Player>, Without<Foe>)>,
+    window: Single<&Window>,
 ) {
     let dt = time.delta_secs();
     let mut rng = rand::rng();
+    let player_pos = player.translation.xy();
+    let vw = viewport_width(&window);
 
     for (ent, mut foe, mut summoner, transform, children) in &mut query {
         summoner.since += dt;
@@ -601,7 +610,14 @@ pub fn summoner(
 
             let shape = SHAPES[summoner.foe_dist.sample(&mut rng)];
             msg.write(GameMsg::SpawnFoe(shape, spawn_pos, Some(ent), Some(angle)));
-            audio.write(AudioMsg::FoeLaunch);
+            if in_viewport(
+                transform.translation,
+                vw,
+                Vec2::splat(-AUDIO_PADDING),
+                player_pos,
+            ) {
+                audio.write(AudioMsg::FoeLaunch);
+            }
             summoner.since = 0.;
 
             let recoil_dir = -direction.xy().normalize_or_zero();
@@ -729,10 +745,13 @@ pub fn foe_launcher(
     mut query: Query<(&mut Foe, &mut Launcher, &Transform, &Children)>,
     mut launcher_query: Query<(&Transform, &mut FoeLauncher)>,
     player: Single<&Transform, With<Player>>,
+    window: Single<&Window>,
     mut msg: MessageWriter<GameMsg>,
     mut audio: MessageWriter<AudioMsg>,
 ) {
     let dt = time.delta_secs();
+    let player_pos = player.translation.xy();
+    let vw = viewport_width(&window);
 
     for (mut foe, mut launcher, foe_transform, children) in &mut query {
         launcher.since += dt;
@@ -745,12 +764,19 @@ pub fn foe_launcher(
                     let tip_local = Vec3::new(HEXAGON_LAUNCHER_LENGTH, 0., 0.);
                     let tip_world = foe_transform
                         .transform_point(launcher_transform.transform_point(tip_local));
-                    let direction = (player.translation.xy() - foe_transform.translation.xy())
-                        .normalize_or_zero();
+                    let direction =
+                        (player_pos - foe_transform.translation.xy()).normalize_or_zero();
                     if !NO_OBSTACLES {
                         msg.write(GameMsg::SpawnObstacle(tip_world.xy(), direction));
                     }
-                    audio.write(AudioMsg::FoeLaunch);
+                    if in_viewport(
+                        foe_transform.translation,
+                        vw,
+                        Vec2::splat(-AUDIO_PADDING),
+                        player_pos,
+                    ) {
+                        audio.write(AudioMsg::FoeLaunch);
+                    }
                     foe.knockback = Some(-direction * LAUNCH_RECOIL_SPEED);
                     foe_launcher.recoil = 1.0;
                     break;
@@ -936,8 +962,12 @@ pub fn projectile(
     stats: Single<(&mut Stats, &mut Text)>,
     time: Res<Time<Virtual>>,
     cache: Res<FoePointsCache>,
+    window: Single<&Window>,
+    player: Single<&Transform, (With<Player>, Without<Projectile>)>,
 ) {
     let (mut stats, mut score_text) = stats.into_inner();
+    let player_pos = player.translation.xy();
+    let vw = viewport_width(&window);
     let mut score_change = false;
     for (projectile_entity, projectile, mut projectile_transform) in &mut projectiles_query {
         if let Ok((target_entity, mut targeted_foe, target_transform, summoner, launcher_foe)) =
@@ -969,7 +999,14 @@ pub fn projectile(
                 msg.write(GameMsg::Despawn(projectile_entity));
                 if targeted_foe.keys_not_hit() <= 1 {
                     msg.write(GameMsg::Explosion(target_transform.translation.xy()));
-                    audio.write(AudioMsg::Explosion);
+                    if in_viewport(
+                        target_transform.translation,
+                        vw,
+                        Vec2::splat(-AUDIO_PADDING),
+                        player_pos,
+                    ) {
+                        audio.write(AudioMsg::Explosion);
+                    }
                     msg.write(GameMsg::Despawn(target_entity));
 
                     stats.inc_score(targeted_foe.num_points());
