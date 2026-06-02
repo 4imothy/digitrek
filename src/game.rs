@@ -537,7 +537,7 @@ pub fn player_movement(
 ) {
     let (mut transform, mut player) = player.into_inner();
     let dt = time.delta_secs();
-    let has_fuel = fuel.0 > 0.;
+    let has_fuel = fuel.0 > 0. || INVINCIBLE;
     let in_movement_mode = stats.running && !time.is_paused() && *mode == Mode::Movement;
 
     let thrusting = in_movement_mode && has_fuel && key.v.is_some();
@@ -559,9 +559,7 @@ pub fn player_movement(
         if has_fuel && movement_factor != 0. {
             let thrust_dir = (transform.rotation * Vec3::Y).xy();
             player.velocity += thrust_dir * movement_factor * PLAYER_THRUST * dt;
-            if !INVINCIBLE {
-                fuel.0 = (fuel.0 - FUEL_DRAIN_RATE * dt).max(0.);
-            }
+            fuel.0 = (fuel.0 - FUEL_DRAIN_RATE * dt).max(0.);
         }
     }
 
@@ -712,19 +710,19 @@ pub fn launcher_foe(
             continue;
         }
 
-        if foe.entered_viewport
-            && !in_viewport(
+        let currently_in_viewport = foe.entered_viewport
+            && in_viewport(
                 transform.translation,
                 viewport_width,
                 Vec2::splat(FOE_SIZE),
                 player_pos,
-            )
-        {
+            );
+        if foe.entered_viewport && launcher.in_viewport && !currently_in_viewport {
             launcher.target_offset =
                 hexagon_target_offset(transform.translation.xy(), player_pos, viewport_width);
-            launcher.anchor_player_pos = player_pos;
         }
-        let target = launcher.anchor_player_pos + launcher.target_offset;
+        launcher.in_viewport = currently_in_viewport;
+        let target = player_pos + launcher.target_offset;
         let pos = transform.translation.xy();
         let to_target = target - pos;
         let dist = to_target.length();
@@ -1065,8 +1063,8 @@ fn collide(a: &[Vec3], b: &[Vec3], padding: Option<f32>) -> Option<(Vec2, bool)>
 
         if let Some(p) = padding {
             min_a -= p;
-            min_b -= p;
             max_a += p;
+            min_b -= p;
             max_b += p;
         }
 
@@ -1162,7 +1160,11 @@ fn closest_point_on_polygon(point: Vec2, polygon: &[Vec3]) -> Option<Vec2> {
 
 fn closest_point_on_segment(p: Vec2, a: Vec2, b: Vec2) -> Vec2 {
     let ab = b - a;
-    let t = ((p - a).dot(ab) / ab.length_squared()).clamp(0., 1.);
+    let len_sq = ab.length_squared();
+    if len_sq == 0. {
+        return a;
+    }
+    let t = ((p - a).dot(ab) / len_sq).clamp(0., 1.);
     a + ab * t
 }
 
@@ -1523,7 +1525,7 @@ pub fn obstacle_collisions(
             {
                 let pos = e_transform.translation;
                 if !o.colliding {
-                    o.velocity = normal * (o.velocity.length() / 2.).max(OBSTACLE_MIN_SPEED);
+                    o.velocity = normal * o.velocity.length().max(OBSTACLE_MIN_SPEED);
                     o.colliding = true;
                 }
                 e.collision(
@@ -1549,15 +1551,15 @@ pub fn obstacle_collisions(
             let a_to_b = (b_transform.translation - a_transform.translation)
                 .xy()
                 .normalize_or_zero();
-            let new_speed_a = (a.velocity.length() / 2.).max(OBSTACLE_MIN_SPEED);
-            let new_speed_b = (b.velocity.length() / 2.).max(OBSTACLE_MIN_SPEED);
+            let new_speed_a = a.velocity.length().max(OBSTACLE_MIN_SPEED);
+            let new_speed_b = b.velocity.length().max(OBSTACLE_MIN_SPEED);
             a.velocity = -a_to_b * new_speed_a;
             b.velocity = a_to_b * new_speed_b;
         }
     }
 }
 
-fn point_launcher(
+pub fn point_launcher(
     player_transform: &Transform,
     launcher_transform: &mut Transform,
     target: &Transform,
@@ -1580,14 +1582,13 @@ pub fn obstacle(
     let dt = time.delta_secs();
     let player_pos = player.translation.xy();
     for (ent, o, mut transform) in obstacles.iter_mut() {
-        let in_viewport = in_viewport(
+        transform.translation += o.velocity.extend(0.) * dt;
+        if !in_viewport(
             transform.translation,
             viewport_width,
-            Vec2::splat(-OBSTACLE_RADIUS),
+            Vec2::new(-viewport_width / 2., -VIEWPORT_HEIGHT / 2.),
             player_pos,
-        );
-        transform.translation += o.velocity.extend(0.) * dt;
-        if !in_viewport {
+        ) {
             msg.write(GameMsg::Despawn(ent));
         }
     }
@@ -1713,10 +1714,6 @@ pub fn fuel_charge(
     time: Res<Time<Virtual>>,
 ) {
     if !stats.running || time.is_paused() {
-        return;
-    }
-    if INVINCIBLE {
-        fuel.0 = 1.;
         return;
     }
     let moving = *mode == Mode::Movement && key.v.is_some();

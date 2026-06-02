@@ -7,6 +7,8 @@ mod credits;
 mod game;
 mod menu;
 mod msg;
+#[cfg(feature = "screenshot")]
+mod screenshot;
 
 use bevy::{
     asset::{RenderAssetUsages, embedded_asset},
@@ -79,7 +81,7 @@ const FOE_SEPARATION_WEIGHT: f32 = 1.5;
 const FOE_SPAWN_RETRY: usize = 5;
 
 const FIRST_FOE_SPAWN_DELAY: f32 = 0.;
-const HEXAGON_LAUNCH_DELAY: f32 = 5.;
+const HEXAGON_LAUNCH_DELAY: f32 = 9.;
 const HEXAGON_TARGET_MIN: f32 = 0.8;
 const PENTAGON_SPAWN_DELAY: f32 = 6.;
 const SPAWN_DELTA: f32 = 0.3;
@@ -426,6 +428,8 @@ fn main() {
     .insert_resource(Config::load(&mut pkv))
     .insert_resource(ClearColor(colors::BASE))
     .insert_resource(pkv);
+    #[cfg(feature = "screenshot")]
+    app.add_plugins(screenshot::plugin);
     embedded_asset!(app, "starfield.wgsl");
     app.run();
 }
@@ -775,7 +779,7 @@ struct Launcher {
     since: f32,
     delay: f32,
     target_offset: Vec2,
-    anchor_player_pos: Vec2,
+    in_viewport: bool,
 }
 
 #[derive(Component)]

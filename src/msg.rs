@@ -375,7 +375,7 @@ fn spawn_foe(
                 since: 0.,
                 delay: HEXAGON_LAUNCH_DELAY,
                 target_offset: hexagon_target_offset(pos, player_pos, viewport_width),
-                anchor_player_pos: player_pos,
+                in_viewport: false,
             });
             add_foe_launcher(
                 &mut ent_cmds,

@@ -32,6 +32,9 @@ jobs:
         run: |
           ./scripts/build_wasm
 
+      - name: replace cache name
+        run: perl -pi -e "s/__BUILD_TS__/$(sha256sum wasm/digitrek_bg.wasm | cut -c1-8)/" wasm/service_worker.js
+
       - name: setup pages
         uses: actions/configure-pages@v5
       - name: upload artifact
