@@ -420,16 +420,14 @@ pub fn help_setup(mut commands: Commands, config: Res<Config>) {
             screen.spawn((
                 Text::new(format!(
                     "avoid polygons and circles\n\
-                     press space to switch between movement and typing modes\n\
                      type the keys on a polygon to destroy it\n\
-                     press backspace or {deselect} to deselect a polygon\n\
-                     use {up}{left}{down}{right} or the arrow keys to move\n\
+                     press backspace or enter to deselect a polygon\n\
+                     use arrow keys or {up}{left}{down}{right} with space or shift to move\n\
                      movement uses fuel, typing and time restore it",
                     up = config.up_char(),
                     left = config.left_char(),
                     down = config.down_char(),
                     right = config.right_char(),
-                    deselect = config.deselect_char(),
                 )),
                 font.clone(),
                 TextColor(colors::LABEL),

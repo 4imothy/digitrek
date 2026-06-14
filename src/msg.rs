@@ -37,8 +37,6 @@ pub fn on_msg(
     mut msg: MessageReader<GameMsg>,
     foes: Query<(&Foe, &Transform), Without<ToDespawn>>,
     player: Single<&Transform, With<Player>>,
-    children_query: Query<&Children>,
-    foe_text_query: Query<(), With<FoeText>>,
     mut config: ResMut<Config>,
     stats: Single<&mut Stats>,
     mut pkv: ResMut<PkvStore>,
@@ -46,7 +44,7 @@ pub fn on_msg(
     shape_assets: Res<ShapeAssets>,
     explosion_assets: Res<ExplosionAssets>,
 ) {
-    let viewport_width = window.width() * VIEWPORT_HEIGHT / window.height();
+    let viewport_width = viewport_width(&window);
     for msg in msg.read() {
         match msg {
             GameMsg::Explosion(position) => {
@@ -55,29 +53,7 @@ pub fn on_msg(
             GameMsg::Despawn(entity) => {
                 commands.entity(*entity).insert(ToDespawn);
             }
-            GameMsg::DespawnText(entity) => {
-                if let Ok(children) = children_query.get(*entity) {
-                    for child in children.iter() {
-                        if foe_text_query.contains(child) {
-                            commands.entity(child).try_despawn();
-                        }
-                    }
-                }
-            }
-            GameMsg::AddText(entity) => {
-                let mut cmd = commands.entity(*entity);
-                if let Ok((foe, _)) = foes.get(*entity)
-                    && foe.keys_not_hit() > 0
-                {
-                    add_text(
-                        &mut cmd,
-                        &foe.keys,
-                        foe.keys_not_hit(),
-                        foe.cleared,
-                        foe.next_index,
-                    );
-                }
-            }
+
             GameMsg::SpawnFoe(shape, pos, spawned_by, rot) => {
                 let player_pos = player.translation.xy();
                 let mut closest = [(f32::MAX, ' '); FOE_AVOID_COUNT];
@@ -192,37 +168,26 @@ fn spawn_explosion(
     }
 }
 
-fn text_color(i: usize, next: usize) -> TextColor {
-    TextColor(if next == i {
-        colors::TEXT_NEXT
-    } else if next > i {
-        colors::TEXT_DONE
-    } else {
-        colors::TEXT_FUTURE
-    })
-}
-
-fn add_text(cmd: &mut EntityCommands, keys: &[char], to_show: usize, cleared: usize, next: usize) {
+fn add_text(cmd: &mut EntityCommands, keys: &[char], num_keys: usize) {
     let bg = TextBackgroundColor(colors::FOE_WORD_BG);
-    let pad = TextColor(Color::NONE);
+    let transparent = TextColor(Color::NONE);
+    let font = foe_font();
     cmd.with_children(|c| {
-        let font = foe_font();
-        let iter = keys.iter().enumerate().skip(cleared).take(to_show);
-        c.spawn((
+        let mut text_cmd = c.spawn((
             Text2d::new(" "),
             TextLayout::default(),
             Transform::from_xyz(0., 0., 0.1),
             font.clone(),
-            pad,
+            transparent,
             bg,
             FoeText,
             NoFrustumCulling,
-        ))
-        .with_children(|c| {
-            for (i, &ch) in iter {
-                c.spawn((TextSpan::new(ch), text_color(i, next), font.clone(), bg));
+        ));
+        text_cmd.with_children(|c| {
+            for (i, &ch) in keys[..num_keys].iter().enumerate() {
+                c.spawn((TextSpan::new(ch), text_color(i, 0), font.clone(), bg));
             }
-            c.spawn((TextSpan::new(" "), pad, font.clone(), bg));
+            c.spawn((TextSpan::new(" "), transparent, font.clone(), bg));
         });
     });
 }
@@ -387,7 +352,7 @@ fn spawn_foe(
             );
         }
     }
-    add_text(&mut ent_cmds, &keys, num_keys, 0, 0);
+    add_text(&mut ent_cmds, &keys, num_keys);
     let e = Foe::new(shape, keys, num_keys, spawned_by);
     ent_cmds.insert(e);
 

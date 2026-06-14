@@ -8,6 +8,7 @@ use bevy::{
     },
     prelude::*,
     render::render_resource::PrimitiveTopology,
+    text::TextLayoutInfo,
 };
 use rand::{self, distr::Distribution};
 use std::{
@@ -21,10 +22,8 @@ pub fn setup(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut vtime: ResMut<Time<Virtual>>,
     mut audio: ResMut<Assets<AudioSource>>,
-    mut mode: ResMut<Mode>,
     mut keyboard_input: ResMut<Messages<KeyboardInput>>,
 ) {
-    *mode = Mode::default();
     keyboard_input.clear();
     vtime.set_relative_speed(TIME_MULTIPLIER);
     commands
@@ -55,7 +54,7 @@ pub fn setup(
             .with_children(|c| {
                 c.spawn((
                     Mesh2d(meshes.add(Circle::new(PLAYER_NOTCH_RADIUS))),
-                    MeshMaterial2d(materials.add(colors::LAUNCHER)),
+                    MeshMaterial2d(materials.add(colors::GLOW)),
                     Transform::from_xyz(0., PLAYER_RING_RADIUS, 1.),
                     LauncherNotch,
                 ));
@@ -295,8 +294,6 @@ impl Foe {
             msg.write(GameMsg::Despawn(entity));
         } else {
             self.add_collision(normal);
-            msg.write(GameMsg::DespawnText(entity));
-            msg.write(GameMsg::AddText(entity));
         }
     }
 
@@ -362,8 +359,6 @@ pub fn keypress(
     mut keyboard_input: MessageReader<KeyboardInput>,
     player: Single<(&mut Player, &Transform), Without<PlayerLauncher>>,
     launcher: Single<&mut Transform, (With<PlayerLauncher>, Without<Player>)>,
-    notch_material: Single<&MeshMaterial2d<ColorMaterial>, With<LauncherNotch>>,
-    mut color_materials: ResMut<Assets<ColorMaterial>>,
     indicator: Single<Entity, (With<Indicator>, Without<Player>)>,
     arrow_pivot: Single<Entity, (With<SelectionArrowPivot>, Without<Player>)>,
     mut foe_query: Query<
@@ -372,10 +367,11 @@ pub fn keypress(
     >,
     time: ResMut<Time<Virtual>>,
     stats: Single<&mut Stats>,
-    mut mode: ResMut<Mode>,
     mut fuel: ResMut<Fuel>,
+    keys: Res<ButtonInput<KeyCode>>,
     config: Res<Config>,
 ) {
+    let movement_modifier = movement_mode(&keys);
     let (mut player, player_transform) = player.into_inner();
     if !stats.running {
         keyboard_input.clear();
@@ -391,31 +387,8 @@ pub fn keypress(
         if time.is_paused() {
             continue;
         }
-        if key.key_code == config.deselect() && *mode == Mode::Movement {
-            msg.write(GameMsg::Invisible(*indicator));
-            msg.write(GameMsg::Invisible(*arrow_pivot));
-            player.selection_active = false;
-            if let Some(selected) = player.selected {
-                msg.write(GameMsg::DeSelect(selected));
-            }
-            player.selected = None;
-            continue;
-        }
         match &key.logical_key {
-            Key::Space if !key.repeat => {
-                *mode = match *mode {
-                    Mode::Movement => Mode::Typing,
-                    Mode::Typing => Mode::Movement,
-                };
-                if let Some(mat) = color_materials.get_mut(notch_material.id()) {
-                    mat.color = if *mode == Mode::Typing {
-                        colors::ACTIVE_NOTCH
-                    } else {
-                        colors::LAUNCHER
-                    };
-                }
-            }
-            Key::Backspace => {
+            Key::Backspace | Key::Enter => {
                 msg.write(GameMsg::Invisible(*indicator));
                 msg.write(GameMsg::Invisible(*arrow_pivot));
                 player.selection_active = false;
@@ -424,7 +397,10 @@ pub fn keypress(
                 }
                 player.selected = None;
             }
-            Key::Character(str) if *mode == Mode::Typing => {
+            Key::Character(str) => {
+                if movement_modifier && config.is_movement_key(key.key_code) {
+                    continue;
+                }
                 if let Some(key) = str.chars().next().map(|c| c.to_ascii_lowercase()) {
                     if let Some(selected) = player.selected
                         && let Ok((selected_entity, mut selected_foe, selected_transform)) =
@@ -450,8 +426,6 @@ pub fn keypress(
                                 msg.write(GameMsg::DeSelect(selected));
                                 player.selected = None;
                             }
-                            msg.write(GameMsg::DespawnText(selected_entity));
-                            msg.write(GameMsg::AddText(selected_entity));
                         } else {
                             audio.write(AudioMsg::UnmatchedKeypress);
                         }
@@ -494,8 +468,6 @@ pub fn keypress(
 
                             fuel.0 = (fuel.0 + FUEL_PER_KEY).min(1.);
                             ce.next_index += 1;
-                            msg.write(GameMsg::DespawnText(e));
-                            msg.write(GameMsg::AddText(e));
                             msg.write(GameMsg::Projectile(
                                 e,
                                 projectile_spawn_location(player_transform, &launcher_transform),
@@ -522,25 +494,20 @@ fn projectile_spawn_location(player_trans: &Transform, launcher_trans: &Transfor
         .with_z(EXPLOSION_Z_INDEX)
 }
 
-fn viewport_width(win: &Window) -> f32 {
-    VIEWPORT_HEIGHT * (win.width() / win.height())
-}
-
 pub fn player_movement(
     time: Res<Time<Virtual>>,
     key: Res<KeyState>,
     mut fuel: ResMut<Fuel>,
     player: Single<(&mut Transform, &mut Player)>,
     stats: Single<&Stats>,
-    mode: Res<Mode>,
     mut glow: Single<&mut Visibility, With<EngineGlow>>,
 ) {
     let (mut transform, mut player) = player.into_inner();
     let dt = time.delta_secs();
     let has_fuel = fuel.0 > 0. || INVINCIBLE;
-    let in_movement_mode = stats.running && !time.is_paused() && *mode == Mode::Movement;
+    let active = stats.running && !time.is_paused();
 
-    let thrusting = in_movement_mode && has_fuel && key.v.is_some();
+    let thrusting = active && has_fuel && key.v.is_some();
     let want = if thrusting {
         Visibility::Visible
     } else {
@@ -550,7 +517,7 @@ pub fn player_movement(
         **glow = want;
     }
 
-    if in_movement_mode {
+    if active {
         let rotation_factor = key.h.map(|v| if v { -1. } else { 1. }).unwrap_or(0.);
         let movement_factor = key.v.map(|v| if v { 1. } else { -1. }).unwrap_or(0.);
 
@@ -1010,9 +977,7 @@ pub fn projectile(
                     stats.inc_score(targeted_foe.num_points());
                     score_change = true;
                 } else {
-                    msg.write(GameMsg::DespawnText(target_entity));
                     targeted_foe.cleared += 1;
-                    msg.write(GameMsg::AddText(target_entity));
                 }
             }
         } else {
@@ -1695,13 +1660,75 @@ pub fn update_countdown_indicators(
     }
 }
 
-pub fn lock_foe_text(
-    mut text_query: Query<(&mut Transform, &ChildOf), (With<FoeText>, Without<Foe>)>,
-    foe_query: Query<&Transform, (With<Foe>, Without<FoeText>)>,
+pub fn sync_foe_text(
+    foe_query: Query<(&Foe, &Children), (Changed<Foe>, Without<ToDespawn>)>,
+    foe_text_query: Query<&Children, With<FoeText>>,
+    mut span_query: Query<(&mut TextSpan, &mut TextColor)>,
 ) {
-    for (mut text_transform, child_of) in text_query.iter_mut() {
-        if let Ok(foe_transform) = foe_query.get(child_of.parent()) {
-            text_transform.rotation = foe_transform.rotation.inverse();
+    for (foe, foe_children) in foe_query.iter() {
+        for child in foe_children.iter() {
+            let Ok(text_children) = foe_text_query.get(child) else {
+                continue;
+            };
+            let visible_end = foe.orig_len.saturating_sub(foe.skipped);
+            for (i, span_entity) in text_children.iter().take(foe.orig_len).enumerate() {
+                let Ok((mut span, mut color)) = span_query.get_mut(span_entity) else {
+                    continue;
+                };
+                if i < foe.cleared || i >= visible_end {
+                    if !span.0.is_empty() {
+                        *span = TextSpan::new("");
+                        color.0 = Color::NONE;
+                    }
+                } else {
+                    let new_color = text_color(i, foe.next_index);
+                    if !span.0.starts_with(foe.keys[i]) {
+                        *span = TextSpan::new(foe.keys[i]);
+                    }
+                    if color.0 != new_color.0 {
+                        *color = new_color;
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn lock_foe_text(
+    mut text_query: Query<
+        (&mut Transform, &mut Visibility, &ChildOf, &TextLayoutInfo),
+        (With<FoeText>, Without<Foe>, Without<Camera2d>),
+    >,
+    foe_query: Query<&Transform, (With<Foe>, Without<FoeText>, Without<ToDespawn>)>,
+    camera: Single<&Transform, With<Camera2d>>,
+    window: Single<&Window>,
+) {
+    let cam = camera.translation;
+    let vw = viewport_width(&window);
+    let half_vw = vw / 2.;
+    let half_vh = VIEWPORT_HEIGHT / 2.;
+    for (mut text_transform, mut vis, child_of, layout) in text_query.iter_mut() {
+        let Ok(foe_transform) = foe_query.get(child_of.parent()) else {
+            *vis = Visibility::Hidden;
+            continue;
+        };
+        text_transform.rotation = foe_transform.rotation.inverse();
+        let foe_pos = foe_transform.translation;
+        let in_viewport = in_viewport(foe_pos, vw, Vec2::splat(-FOE_SIZE), cam.xy());
+        *vis = if in_viewport {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if in_viewport && layout.size.x > 0. {
+            let half_text = layout.size / 2.;
+            let clamped = foe_pos.xy().clamp(
+                cam.xy() - Vec2::new(half_vw, half_vh) + half_text,
+                cam.xy() + Vec2::new(half_vw, half_vh) - half_text,
+            );
+            let local_offset =
+                foe_transform.rotation.inverse() * (clamped - foe_pos.xy()).extend(0.);
+            text_transform.translation = local_offset.with_z(0.1);
         }
     }
 }
@@ -1709,15 +1736,13 @@ pub fn lock_foe_text(
 pub fn fuel_charge(
     mut fuel: ResMut<Fuel>,
     key: Res<KeyState>,
-    mode: Res<Mode>,
     stats: Single<&Stats>,
     time: Res<Time<Virtual>>,
 ) {
     if !stats.running || time.is_paused() {
         return;
     }
-    let moving = *mode == Mode::Movement && key.v.is_some();
-    if !moving {
+    if key.v.is_none() {
         fuel.0 = (fuel.0 + FUEL_PASSIVE_RATE * time.delta_secs()).min(1.);
     }
 }
@@ -1728,7 +1753,7 @@ pub fn update_stars(
     window: Single<&Window>,
 ) {
     let cam = camera.translation;
-    let vw = VIEWPORT_HEIGHT * window.width() / window.height();
+    let vw = viewport_width(&window);
     quad.translation = Vec3::new(cam.x, cam.y, STAR_Z_INDEX);
     quad.scale = Vec3::new(vw, VIEWPORT_HEIGHT, 1.);
 }

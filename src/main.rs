@@ -16,6 +16,7 @@ use bevy::{
     prelude::*,
     render::render_resource::AsBindGroup,
     shader::ShaderRef,
+    sprite::update_text2d_layout,
     sprite_render::{AlphaMode2d, Material2d, Material2dPlugin},
 };
 use bevy_pkv::PkvStore;
@@ -264,7 +265,6 @@ mod colors {
     pub const BASE: Color = BACKGROUND;
     pub const SHAPE_COLORS: [Color; 4] = [RED, PINK, PURPLE, ORANGE];
     pub const INDICATOR: Color = YELLOW;
-    pub const ACTIVE_NOTCH: Color = CYAN;
     pub const PROJECTILE: Color = CYAN;
     pub const GLOW: Color = CYAN;
     pub const OBSTACLE: Color = GREEN;
@@ -382,21 +382,11 @@ impl Config {
     pub fn down(&self) -> KeyCode {
         self.layout_key(3).0
     }
-    fn deselect_key(&self) -> (KeyCode, char) {
-        match self.physical_keyboard_layout {
-            KeyboardLayouts::Qwerty => (KeyCode::KeyK, 'k'),
-            KeyboardLayouts::Dvorak => (KeyCode::KeyT, 't'),
-            KeyboardLayouts::Colemak => (KeyCode::KeyE, 'e'),
-        }
-    }
-    pub fn deselect(&self) -> KeyCode {
-        self.deselect_key().0
-    }
-    pub fn deselect_char(&self) -> char {
-        self.deselect_key().1
-    }
     pub fn down_char(&self) -> char {
         self.layout_key(3).1
+    }
+    pub fn is_movement_key(&self, key: KeyCode) -> bool {
+        key == self.up() || key == self.down() || key == self.left() || key == self.right()
     }
 }
 
@@ -532,16 +522,24 @@ fn update_key_state(
     config: Res<Config>,
     mut key: ResMut<KeyState>,
     rtime: Res<Time<Real>>,
+    screen: Res<State<Screen>>,
+    game_screen: Res<State<GameScreen>>,
 ) {
+    let playing = matches!(screen.get(), Screen::Game)
+        && matches!(
+            game_screen.get(),
+            GameScreen::Running | GameScreen::ResumeCountdown
+        );
+    let mv = !playing || movement_mode(&keys);
     key.update(
-        keys.pressed(KeyCode::ArrowUp) || keys.pressed(config.up()),
-        keys.pressed(KeyCode::ArrowDown) || keys.pressed(config.down()),
-        keys.pressed(KeyCode::ArrowLeft) || keys.pressed(config.left()),
-        keys.pressed(KeyCode::ArrowRight) || keys.pressed(config.right()),
-        keys.just_pressed(KeyCode::ArrowUp) || keys.just_pressed(config.up()),
-        keys.just_pressed(KeyCode::ArrowDown) || keys.just_pressed(config.down()),
-        keys.just_pressed(KeyCode::ArrowLeft) || keys.just_pressed(config.left()),
-        keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(config.right()),
+        keys.pressed(KeyCode::ArrowUp) || (mv && keys.pressed(config.up())),
+        keys.pressed(KeyCode::ArrowDown) || (mv && keys.pressed(config.down())),
+        keys.pressed(KeyCode::ArrowLeft) || (mv && keys.pressed(config.left())),
+        keys.pressed(KeyCode::ArrowRight) || (mv && keys.pressed(config.right())),
+        keys.just_pressed(KeyCode::ArrowUp) || (mv && keys.just_pressed(config.up())),
+        keys.just_pressed(KeyCode::ArrowDown) || (mv && keys.just_pressed(config.down())),
+        keys.just_pressed(KeyCode::ArrowLeft) || (mv && keys.just_pressed(config.left())),
+        keys.just_pressed(KeyCode::ArrowRight) || (mv && keys.just_pressed(config.right())),
         rtime.delta_secs(),
     );
 }
@@ -568,8 +566,7 @@ fn game_plugin(app: &mut App) {
         despawn::<Slowdown>,
         despawn::<Stats>,
     );
-    app.insert_resource(Mode::default())
-        .add_systems(OnEnter(Screen::Game), game::setup)
+    app.add_systems(OnEnter(Screen::Game), game::setup)
         .add_systems(OnExit(Screen::Game), exit)
         .insert_resource(FoePointsCache(HashMap::new()))
         .insert_resource(Time::<Fixed>::from_hz(60.))
@@ -651,8 +648,12 @@ fn game_plugin(app: &mut App) {
                 msg::on_audio,
                 game::reset_collisions.after(msg::on_msg),
                 game::despawner.after(msg::on_msg),
+                game::sync_foe_text
+                    .after(msg::on_msg)
+                    .before(update_text2d_layout),
                 game::lock_foe_text
                     .after(msg::on_msg)
+                    .after(update_text2d_layout)
                     .before(TransformSystems::Propagate),
             )
                 .run_if(in_state(Screen::Game)),
@@ -720,8 +721,6 @@ struct Player {
 enum GameMsg {
     Explosion(Vec2),
     Despawn(Entity),
-    DespawnText(Entity),
-    AddText(Entity),
     SpawnFoe(Shape, Vec2, Option<Entity>, Option<f32>),
     SpawnObstacle(Vec2, Vec2),
     Invisible(Entity),
@@ -1014,13 +1013,6 @@ impl KeyState {
     }
 }
 
-#[derive(Resource, Default, PartialEq, Eq, Clone, Copy)]
-pub enum Mode {
-    #[default]
-    Movement,
-    Typing,
-}
-
 #[derive(Component)]
 pub struct VolumeControl;
 
@@ -1073,6 +1065,26 @@ struct Clock(f32);
 
 #[derive(Resource)]
 pub struct Fuel(pub f32);
+
+pub fn viewport_width(win: &Window) -> f32 {
+    VIEWPORT_HEIGHT * (win.width() / win.height())
+}
+
+pub fn movement_mode(keys: &ButtonInput<KeyCode>) -> bool {
+    keys.pressed(KeyCode::ShiftLeft)
+        || keys.pressed(KeyCode::ShiftRight)
+        || keys.pressed(KeyCode::Space)
+}
+
+pub fn text_color(i: usize, next: usize) -> TextColor {
+    TextColor(if next == i {
+        colors::TEXT_NEXT
+    } else if next > i {
+        colors::TEXT_DONE
+    } else {
+        colors::TEXT_FUTURE
+    })
+}
 
 fn toggle_pause(mut msg: MessageWriter<PauseMsg>) {
     msg.write(PauseMsg::TogglePause);

@@ -45,9 +45,9 @@ fn orchestrate(
     mut flow: ResMut<ScreenshotFlow>,
     mut commands: Commands,
     mut msg: MessageWriter<GameMsg>,
-    mut mode: ResMut<Mode>,
     mut fuel: ResMut<Fuel>,
     mut spawner: ResMut<Spawner>,
+    stats: Single<(&mut Stats, &mut Text)>,
     mut foes: Query<
         (
             Entity,
@@ -58,14 +58,13 @@ fn orchestrate(
         ),
         Without<PlayerLauncher>,
     >,
-    notch_material: Single<&MeshMaterial2d<ColorMaterial>, With<LauncherNotch>>,
-    mut color_materials: ResMut<Assets<ColorMaterial>>,
     time: Res<Time<Real>>,
     player: Single<&Transform, (With<Player>, Without<Foe>, Without<PlayerLauncher>)>,
     mut launcher: Single<&mut Transform, With<PlayerLauncher>>,
 ) {
     flow.elapsed += time.delta_secs();
     spawner.foe_delay = 9999.;
+    let (mut stats, mut score_text) = stats.into_inner();
 
     let player_pos = Vec2::new(0., 25.);
     let t = flow.elapsed;
@@ -120,16 +119,14 @@ fn orchestrate(
         msg.write(GameMsg::SpawnFoe(Shape::Hexagon, hex, None, None));
 
         msg.write(GameMsg::Explosion(Vec2::new(100., 310.)));
+        stats.score = 4;
+        stats.show(&mut score_text);
         msg.write(GameMsg::SpawnObstacle(
             Vec2::new(180., -90.),
             Vec2::new(-0.843, 0.539),
         ));
 
-        *mode = Mode::Typing;
         fuel.0 = 0.65;
-        if let Some(mat) = color_materials.get_mut(notch_material.id()) {
-            mat.color = colors::ACTIVE_NOTCH;
-        }
     } else if stage == 1 && t >= 0.25 {
         flow.stage = 2;
         let mut pent_ent_pos: Option<(Entity, Vec2)> = None;
@@ -152,8 +149,6 @@ fn orchestrate(
         }
 
         if let Some(entity) = flow.rho_ent {
-            msg.write(GameMsg::DespawnText(entity));
-            msg.write(GameMsg::AddText(entity));
             msg.write(GameMsg::Select(entity));
             point_launcher(
                 &player,
