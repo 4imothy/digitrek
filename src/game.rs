@@ -23,6 +23,8 @@ pub fn setup(
     mut vtime: ResMut<Time<Virtual>>,
     mut audio: ResMut<Assets<AudioSource>>,
     mut keyboard_input: ResMut<Messages<KeyboardInput>>,
+    app_font: Res<AppFont>,
+    palette: Res<ColorPalette>,
 ) {
     keyboard_input.clear();
     vtime.set_relative_speed(TIME_MULTIPLIER);
@@ -43,7 +45,7 @@ pub fn setup(
         .with_children(|cmds| {
             cmds.spawn((
                 Mesh2d(meshes.add(CircularSector::new(PLAYER_RADIUS, PLAYER_HALF_ANGLE))),
-                MeshMaterial2d(materials.add(colors::PLAYER)),
+                MeshMaterial2d(materials.add(palette.player)),
                 Transform::from_xyz(0., -PLAYER_RADIUS / 2., 0.),
             ));
             cmds.spawn((
@@ -54,7 +56,7 @@ pub fn setup(
             .with_children(|c| {
                 c.spawn((
                     Mesh2d(meshes.add(Circle::new(PLAYER_NOTCH_RADIUS))),
-                    MeshMaterial2d(materials.add(colors::GLOW)),
+                    MeshMaterial2d(materials.add(palette.projectile)),
                     Transform::from_xyz(0., PLAYER_RING_RADIUS, 1.),
                     LauncherNotch,
                 ));
@@ -64,7 +66,7 @@ pub fn setup(
                     PLAYER_RING_RADIUS - PLAYER_RING_THICKNESS / 2.,
                     PLAYER_RING_RADIUS + PLAYER_RING_THICKNESS / 2.,
                 ))),
-                MeshMaterial2d(materials.add(colors::LAUNCHER)),
+                MeshMaterial2d(materials.add(palette.launcher)),
                 Transform::from_xyz(0., 0., 0.5),
             ));
             cmds.spawn((
@@ -74,7 +76,7 @@ pub fn setup(
                     PLAYER_RING_RADIUS + PLAYER_RING_THICKNESS / 2.,
                     0.,
                 ))),
-                MeshMaterial2d(materials.add(colors::GLOW)),
+                MeshMaterial2d(materials.add(palette.glow)),
                 Transform::from_xyz(0., 0., 0.6),
                 Visibility::Hidden,
             ));
@@ -83,7 +85,7 @@ pub fn setup(
                     PLAYER_ENGINE_WIDTH,
                     PLAYER_ENGINE_WIDTH / 2.,
                 ))),
-                MeshMaterial2d(materials.add(colors::LAUNCHER)),
+                MeshMaterial2d(materials.add(palette.launcher)),
                 Transform::from_xyz(0., PLAYER_RADIUS / 2., -1.),
             ));
             cmds.spawn((
@@ -91,7 +93,7 @@ pub fn setup(
                     0.8 * PLAYER_ENGINE_WIDTH / 2.,
                     FRAC_PI_2,
                 ))),
-                MeshMaterial2d(materials.add(colors::GLOW)),
+                MeshMaterial2d(materials.add(palette.glow)),
                 Transform::from_xyz(0., PLAYER_RADIUS / 2. + PLAYER_ENGINE_WIDTH / 4., 2.),
                 Visibility::Hidden,
                 EngineGlow,
@@ -108,7 +110,7 @@ pub fn setup(
                         Vec2::new(-SELECTION_ARROW_HALF_WIDTH, -SELECTION_ARROW_HALF_HEIGHT),
                         Vec2::new(SELECTION_ARROW_HALF_WIDTH, -SELECTION_ARROW_HALF_HEIGHT),
                     ))),
-                    MeshMaterial2d(materials.add(colors::INDICATOR)),
+                    MeshMaterial2d(materials.add(palette.indicator)),
                     Transform::from_xyz(0., SELECTION_ARROW_RADIUS, 0.5),
                 ));
             });
@@ -133,7 +135,7 @@ pub fn setup(
                 INDICATOR_RADIUS - INDICATOR_THICKNESS / 2.,
                 INDICATOR_RADIUS + INDICATOR_THICKNESS / 2.,
             ))),
-            MeshMaterial2d(materials.add(colors::INDICATOR)),
+            MeshMaterial2d(materials.add(palette.indicator)),
             Transform::from_xyz(0., 0., INDICATOR_Z_INDEX),
             Visibility::Hidden,
         ))
@@ -146,7 +148,7 @@ pub fn setup(
                 INDICATOR_THICKNESS,
                 INDICATOR_LONG_RECTANGLE_LENGTH,
             ));
-            let mat = materials.add(colors::INDICATOR);
+            let mat = materials.add(palette.indicator);
             for (m, x, y) in [
                 (h.clone(), -INDICATOR_RADIUS, 0.),
                 (h, INDICATOR_RADIUS, 0.),
@@ -169,7 +171,7 @@ pub fn setup(
             ..default()
         },
         Text::new("0"),
-        text_font(),
+        text_font(&app_font.0),
         Stats {
             score: 0,
             running: true,
@@ -203,7 +205,7 @@ pub fn setup(
             meshes.add(PENTAGON),
             meshes.add(HEXAGON),
         ],
-        materials: colors::SHAPE_COLORS.map(|c| materials.add(c)),
+        materials: palette.shape_colors().map(|c| materials.add(c)),
     });
     commands.insert_resource(ExplosionAssets {
         meshes: std::array::from_fn(|i| {
@@ -327,10 +329,9 @@ impl Stats {
             self.score += dif;
         }
     }
-    pub fn save_high_score(&self, config: &mut ResMut<Config>, pkv: &mut ResMut<PkvStore>) {
+    pub fn save_high_score(&self, config: &mut ResMut<Config>) {
         if self.score > config.high_score {
             config.high_score = self.score;
-            let _ = pkv.set(HIGH_SCORE_KEY, &config.high_score);
         }
     }
 }
@@ -684,11 +685,14 @@ pub fn launcher_foe(
                 Vec2::splat(FOE_SIZE),
                 player_pos,
             );
-        if foe.entered_viewport && launcher.in_viewport && !currently_in_viewport {
-            launcher.target_offset =
-                hexagon_target_offset(transform.translation.xy(), player_pos, viewport_width);
+        if !currently_in_viewport {
+            launcher.target_offset = hexagon_target_offset(
+                transform.translation.xy(),
+                player_pos,
+                viewport_width,
+                launcher.target_frac,
+            );
         }
-        launcher.in_viewport = currently_in_viewport;
         let target = player_pos + launcher.target_offset;
         let pos = transform.translation.xy();
         let to_target = target - pos;
@@ -1247,7 +1251,7 @@ pub fn explosion_system(
 
     for (entity, mut transform, mut particle) in &mut query {
         particle.lifetime -= dt;
-        if let Some(material) = materials.get_mut(&particle.material) {
+        if let Some(mut material) = materials.get_mut(&particle.material) {
             let alpha = particle.lifetime.max(0.) / EXPLOSION_PARTICLE_MAX_LIFETIME;
             material
                 .color
@@ -1392,10 +1396,14 @@ pub fn spawner(
 
 pub fn reset_collisions(mut enemies: Query<&mut Foe>, mut obstacles: Query<&mut Obstacle>) {
     for mut e in enemies.iter_mut() {
-        e.colliding = false;
+        if e.colliding {
+            e.colliding = false;
+        }
     }
     for mut o in obstacles.iter_mut() {
-        o.colliding = false;
+        if o.colliding {
+            o.colliding = false;
+        }
     }
 }
 
@@ -1631,7 +1639,7 @@ pub fn update_launcher_ring(
         Visibility::Hidden
     };
     if fuel.is_changed()
-        && let Some(mesh) = meshes.get_mut(mesh2d.id())
+        && let Some(mut mesh) = meshes.get_mut(mesh2d.id())
     {
         *mesh = launcher_ring_mesh(
             PLAYER_RING_RADIUS - PLAYER_RING_THICKNESS / 2.,
@@ -1660,33 +1668,69 @@ pub fn update_countdown_indicators(
     }
 }
 
+fn foe_char(foe: &Foe, palette: &ColorPalette, i: usize) -> (Option<char>, Color) {
+    let visible_end = foe.orig_len.saturating_sub(foe.skipped);
+    if i < foe.cleared || i >= visible_end {
+        (None, Color::NONE)
+    } else {
+        (Some(foe.keys[i]), text_color(palette, i, foe.next_index).0)
+    }
+}
+
 pub fn sync_foe_text(
     foe_query: Query<(&Foe, &Children), (Changed<Foe>, Without<ToDespawn>)>,
-    foe_text_query: Query<&Children, With<FoeText>>,
-    mut span_query: Query<(&mut TextSpan, &mut TextColor)>,
+    mut foe_text_query: Query<(&mut Text2d, &mut TextColor, &Children), With<FoeText>>,
+    mut span_query: Query<(&mut TextSpan, &mut TextColor), Without<FoeText>>,
+    palette: Res<ColorPalette>,
 ) {
     for (foe, foe_children) in foe_query.iter() {
         for child in foe_children.iter() {
-            let Ok(text_children) = foe_text_query.get(child) else {
+            let Ok((mut root, mut root_color, text_children)) = foe_text_query.get_mut(child)
+            else {
                 continue;
             };
-            let visible_end = foe.orig_len.saturating_sub(foe.skipped);
-            for (i, span_entity) in text_children.iter().take(foe.orig_len).enumerate() {
+            match foe_char(foe, &palette, 0) {
+                (None, col) => {
+                    if !root.0.is_empty() {
+                        *root = Text2d::new("");
+                    }
+                    if root_color.0 != col {
+                        root_color.0 = col;
+                    }
+                }
+                (Some(ch), col) => {
+                    if !root.0.starts_with(ch) {
+                        *root = Text2d::new(ch);
+                    }
+                    if root_color.0 != col {
+                        root_color.0 = col;
+                    }
+                }
+            }
+            for (j, span_entity) in text_children
+                .iter()
+                .take(foe.orig_len.saturating_sub(1))
+                .enumerate()
+            {
                 let Ok((mut span, mut color)) = span_query.get_mut(span_entity) else {
                     continue;
                 };
-                if i < foe.cleared || i >= visible_end {
-                    if !span.0.is_empty() {
-                        *span = TextSpan::new("");
-                        color.0 = Color::NONE;
+                match foe_char(foe, &palette, j + 1) {
+                    (None, col) => {
+                        if !span.0.is_empty() {
+                            *span = TextSpan::new("");
+                        }
+                        if color.0 != col {
+                            color.0 = col;
+                        }
                     }
-                } else {
-                    let new_color = text_color(i, foe.next_index);
-                    if !span.0.starts_with(foe.keys[i]) {
-                        *span = TextSpan::new(foe.keys[i]);
-                    }
-                    if color.0 != new_color.0 {
-                        *color = new_color;
+                    (Some(ch), col) => {
+                        if !span.0.starts_with(ch) {
+                            *span = TextSpan::new(ch);
+                        }
+                        if color.0 != col {
+                            color.0 = col;
+                        }
                     }
                 }
             }
@@ -1696,9 +1740,16 @@ pub fn sync_foe_text(
 
 pub fn lock_foe_text(
     mut text_query: Query<
-        (&mut Transform, &mut Visibility, &ChildOf, &TextLayoutInfo),
+        (
+            &mut Transform,
+            &mut Visibility,
+            &ChildOf,
+            &TextLayoutInfo,
+            &Children,
+        ),
         (With<FoeText>, Without<Foe>, Without<Camera2d>),
     >,
+    mut bg_query: Query<&mut Sprite, With<FoeTextBg>>,
     foe_query: Query<&Transform, (With<Foe>, Without<FoeText>, Without<ToDespawn>)>,
     camera: Single<&Transform, With<Camera2d>>,
     window: Single<&Window>,
@@ -1707,7 +1758,7 @@ pub fn lock_foe_text(
     let vw = viewport_width(&window);
     let half_vw = vw / 2.;
     let half_vh = VIEWPORT_HEIGHT / 2.;
-    for (mut text_transform, mut vis, child_of, layout) in text_query.iter_mut() {
+    for (mut text_transform, mut vis, child_of, layout, children) in text_query.iter_mut() {
         let Ok(foe_transform) = foe_query.get(child_of.parent()) else {
             *vis = Visibility::Hidden;
             continue;
@@ -1720,15 +1771,27 @@ pub fn lock_foe_text(
         } else {
             Visibility::Hidden
         };
-        if in_viewport && layout.size.x > 0. {
-            let half_text = layout.size / 2.;
-            let clamped = foe_pos.xy().clamp(
-                cam.xy() - Vec2::new(half_vw, half_vh) + half_text,
-                cam.xy() + Vec2::new(half_vw, half_vh) - half_text,
-            );
-            let local_offset =
-                foe_transform.rotation.inverse() * (clamped - foe_pos.xy()).extend(0.);
-            text_transform.translation = local_offset.with_z(0.1);
+        if layout.size.x > 0. {
+            let pad = Vec2::new(FOE_FONT_SIZE * 0.5, -FOE_FONT_SIZE * 0.2);
+            let bg_size = Some(layout.size + pad);
+            for child in children.iter() {
+                if let Ok(mut sprite) = bg_query.get_mut(child)
+                    && sprite.custom_size != bg_size
+                {
+                    sprite.custom_size = bg_size;
+                }
+            }
+            if in_viewport {
+                let half = (layout.size + pad.max(Vec2::ZERO)) / 2.;
+                let clamped = foe_pos.xy().clamp(
+                    cam.xy() - Vec2::new(half_vw, half_vh) + half,
+                    cam.xy() + Vec2::new(half_vw, half_vh) - half,
+                );
+                let local_offset =
+                    foe_transform.rotation.inverse() * (clamped - foe_pos.xy()).extend(0.);
+                let z_off = (child_of.parent().to_bits() % 256) as f32 * 0.001;
+                text_transform.translation = local_offset.with_z(0.1 + z_off);
+            }
         }
     }
 }

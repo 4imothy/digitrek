@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+
+set -e
+cargo +nightly fmt
+cargo clippy --all-features
+cargo clippy --all-features --target wasm32-unknown-unknown
+cargo upgrade --verbose --verbose --incompatible --dry-run

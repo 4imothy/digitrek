@@ -4,25 +4,34 @@
 #![allow(clippy::too_many_arguments)]
 
 mod credits;
+mod font_store;
 mod game;
 mod menu;
 mod msg;
+mod palette;
 #[cfg(feature = "screenshot")]
 mod screenshot;
+
+pub use palette::{CHANNELS, ColorField, ColorPalette, channel_u8, with_channel};
 
 use bevy::{
     asset::{RenderAssetUsages, embedded_asset},
     input::common_conditions::input_just_pressed,
     prelude::*,
     render::render_resource::AsBindGroup,
+    settings::{
+        ReflectSettingsGroup, SaveSettingsDeferred, SaveSettingsSync, SettingsGroup, SettingsPlugin,
+    },
     shader::ShaderRef,
     sprite::update_text2d_layout,
     sprite_render::{AlphaMode2d, Material2d, Material2dPlugin},
+    text::{detect_text_needs_rerender, load_font_assets_into_font_collection},
 };
-use bevy_pkv::PkvStore;
 use rand::distr::weighted::WeightedIndex;
-use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, f32::consts::PI, sync::LazyLock};
+
+const APP_QUALIFIER: &str = "com.github";
+const APP_ORG: &str = "4imothy";
 
 const SHOW_LOCAL_POINTS: bool = cfg!(feature = "show_local_points");
 const INVINCIBLE: bool = cfg!(feature = "invincible");
@@ -199,12 +208,12 @@ static WORD_LIST_4: [&str; WORD_LIST_LEN] = include!("../assets/words_4.rs");
 static WORD_LIST_5: [&str; WORD_LIST_LEN] = include!("../assets/words_5.rs");
 static WORD_LIST_6: [&str; WORD_LIST_LEN] = include!("../assets/words_6.rs");
 
-pub fn hexagon_target_offset(from: Vec2, player_pos: Vec2, viewport_width: f32) -> Vec2 {
+pub fn hexagon_target_offset(from: Vec2, player_pos: Vec2, viewport_width: f32, frac: f32) -> Vec2 {
     let half_w = viewport_width / 2. - FOE_SIZE;
     let half_h = VIEWPORT_HEIGHT / 2. - FOE_SIZE;
     let dir = (from - player_pos).normalize_or(Vec2::X);
     let t_max = (half_w / dir.x.abs()).min(half_h / dir.y.abs());
-    dir * rand::random_range((t_max * HEXAGON_TARGET_MIN)..=t_max)
+    dir * (t_max * frac)
 }
 
 fn spawner_foe_delay_mu(x: f32, max_dif: bool) -> f32 {
@@ -241,67 +250,6 @@ const EXPLOSION_PARTICLE_INITIAL_ALPHA: f32 = 0.7;
 const GAME_OVER_SLOWDOWN_REAL_TIME: f32 = 3.;
 const TIME_BEFORE_RESUME: f32 = 3.;
 
-const HIGH_SCORE_KEY: &str = "high_score";
-const VOLUME_KEY: &str = "volume";
-const PHYSICAL_KEYBOARD_LAYOUT_KEY: &str = "physical_keyboard_layout_key";
-const MAX_DIFFICULTY_KEY: &str = "max_difficulty";
-
-mod colors {
-    use bevy::color::{Color, Srgba};
-
-    // https://draculatheme.com/spec
-    const BACKGROUND: Color = Color::srgb_u8(40, 42, 54);
-    pub const SELECTION: Color = Color::srgb_u8(68, 71, 90);
-    const COMMENT: Color = Color::srgb_u8(98, 114, 164);
-    const FOREGROUND: Color = Color::srgb_u8(248, 248, 242);
-    const GREEN: Color = Color::srgb_u8(80, 250, 123);
-    const YELLOW: Color = Color::srgb_u8(241, 250, 140);
-    const CYAN: Color = Color::srgb_u8(139, 233, 253);
-    const PURPLE: Color = Color::srgb_u8(189, 147, 249);
-    const PINK: Color = Color::srgb_u8(255, 121, 198);
-    pub const ORANGE: Color = Color::srgb_u8(255, 184, 108);
-    const RED: Color = Color::srgb_u8(255, 85, 85);
-
-    pub const BASE: Color = BACKGROUND;
-    pub const SHAPE_COLORS: [Color; 4] = [RED, PINK, PURPLE, ORANGE];
-    pub const INDICATOR: Color = YELLOW;
-    pub const PROJECTILE: Color = CYAN;
-    pub const GLOW: Color = CYAN;
-    pub const OBSTACLE: Color = GREEN;
-    pub const PLAYER: Color = FOREGROUND;
-    pub const LAUNCHER: Color = SELECTION;
-    pub const TEXT_NEXT: Color = CYAN;
-    pub const TEXT_DONE: Color = BACKGROUND;
-    pub const TEXT_FUTURE: Color = FOREGROUND;
-    pub const LABEL: Color = FOREGROUND;
-    pub const BUTTON_TEXT: Color = PURPLE;
-    const ALPHA: f32 = 0.7;
-    pub const IN_GAME_MENU: Color = match SELECTION {
-        Color::Srgba(x) => Color::Srgba(Srgba { alpha: ALPHA, ..x }),
-        _ => unreachable!(),
-    };
-    pub const SELECTED_OUTLINE: Color = FOREGROUND;
-    pub const UNSELECTED_OUTLINE: Color = COMMENT;
-    pub const VOLUME_BAR: Color = FOREGROUND;
-    pub const TITLE_CHARS: [Color; env!("CARGO_PKG_NAME").len()] =
-        [GREEN, PINK, ORANGE, PINK, YELLOW, PURPLE, CYAN, RED];
-    pub const OUTLINE_MESH: Color = match COMMENT {
-        Color::Srgba(x) => Color::Srgba(Srgba { alpha: ALPHA, ..x }),
-        _ => unreachable!(),
-    };
-    pub const STAR: Color = match COMMENT {
-        Color::Srgba(x) => Color::Srgba(Srgba { alpha: 0.4, ..x }),
-        _ => unreachable!(),
-    };
-    pub const DUST_A: Color = PURPLE;
-    pub const DUST_B: Color = CYAN;
-    pub const EXPLOSION: [Color; 2] = [ORANGE, RED];
-    pub const FOE_WORD_BG: Color = match BACKGROUND {
-        Color::Srgba(x) => Color::Srgba(Srgba { alpha: ALPHA, ..x }),
-        _ => unreachable!(),
-    };
-}
-
 const PRESS_REPEAT_DELAY: f32 = 0.4;
 const PRESS_REPEAT_INTERVAL: f32 = 0.1;
 
@@ -326,31 +274,52 @@ const COLEMAK_MOVEMENT: [(KeyCode, char); 4] = [
     (KeyCode::KeyR, 'r'),
 ];
 
-#[derive(Resource)]
+#[derive(Resource, SettingsGroup, Reflect)]
+#[reflect(Resource, SettingsGroup, Default)]
 struct Config {
     high_score: usize,
     volume: u8,
     physical_keyboard_layout: KeyboardLayouts,
     max_difficulty: bool,
+    colors: Vec<(ColorField, [u8; 3])>,
 }
 
-impl Config {
-    pub fn load(pkv: &mut PkvStore) -> Self {
-        let mut config = Config {
+impl Default for Config {
+    fn default() -> Self {
+        Config {
             high_score: 0,
             volume: 100,
             physical_keyboard_layout: KeyboardLayouts::Qwerty,
             max_difficulty: false,
-        };
-        load_or_set(pkv, HIGH_SCORE_KEY, &mut config.high_score);
-        load_or_set(pkv, VOLUME_KEY, &mut config.volume);
-        load_or_set(
-            pkv,
-            PHYSICAL_KEYBOARD_LAYOUT_KEY,
-            &mut config.physical_keyboard_layout,
-        );
-        load_or_set(pkv, MAX_DIFFICULTY_KEY, &mut config.max_difficulty);
-        config
+            colors: Vec::new(),
+        }
+    }
+}
+
+impl Config {
+    pub fn build_palette(&self) -> ColorPalette {
+        let mut p = ColorPalette::default();
+        for &(field, rgb) in &self.colors {
+            p.set_color_for_field(field, Color::srgb_u8(rgb[0], rgb[1], rgb[2]));
+        }
+        p
+    }
+
+    pub fn set_color_field(&mut self, field: ColorField, color: Color) {
+        let rgb = [
+            channel_u8(color, 0),
+            channel_u8(color, 1),
+            channel_u8(color, 2),
+        ];
+        if let Some(entry) = self.colors.iter_mut().find(|(f, _)| *f == field) {
+            entry.1 = rgb;
+        } else {
+            self.colors.push((field, rgb));
+        }
+    }
+
+    pub fn reset_colors(&mut self) {
+        self.colors.clear();
     }
 
     fn layout_key(&self, idx: usize) -> (KeyCode, char) {
@@ -390,17 +359,22 @@ impl Config {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Reflect, Default, Clone, Copy, PartialEq)]
+#[reflect(Default)]
 enum KeyboardLayouts {
+    #[default]
     Qwerty,
     Dvorak,
     Colemak,
 }
 
 fn main() {
-    let mut pkv = PkvStore::new("timware", env!("CARGO_PKG_NAME"));
     let mut app = App::new();
     app.add_plugins((
+        SettingsPlugin::new(&format!(
+            "{APP_QUALIFIER}.{APP_ORG}.{}",
+            env!("CARGO_PKG_NAME")
+        )),
         DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: env!("CARGO_PKG_NAME").to_string(),
@@ -413,39 +387,53 @@ fn main() {
         game_plugin,
     ))
     .add_message::<PauseMsg>()
-    .add_systems(Startup, setup)
+    .add_systems(
+        Startup,
+        (
+            setup,
+            handle_font_action,
+            load_font_assets_into_font_collection,
+        )
+            .chain(),
+    )
+    .add_systems(Update, handle_font_action)
+    .add_systems(Update, sync_starfield)
+    .add_systems(Update, auto_save_settings)
+    .add_systems(Last, flush_settings_on_exit)
     .init_state::<Screen>()
-    .insert_resource(Config::load(&mut pkv))
-    .insert_resource(ClearColor(colors::BASE))
-    .insert_resource(pkv);
+    .insert_resource(ColorPalette::default())
+    .insert_resource(ClearColor(ColorPalette::default().background))
+    .insert_resource(AppFont(Handle::default()));
     #[cfg(feature = "screenshot")]
     app.add_plugins(screenshot::plugin);
+    #[cfg(not(feature = "screenshot"))]
+    app.add_systems(
+        Startup,
+        (|mut next: ResMut<NextState<Screen>>| next.set(Screen::MainMenu)).after(setup),
+    );
+    #[cfg(not(target_arch = "wasm32"))]
+    app.add_systems(
+        Update,
+        menu::handle_file_drop.run_if(in_state(Screen::Settings)),
+    );
     embedded_asset!(app, "starfield.wgsl");
+    font_store::init();
     app.run();
-}
-
-fn load_or_set<T: serde::de::DeserializeOwned + serde::Serialize>(
-    pkv: &mut PkvStore,
-    key: &str,
-    field: &mut T,
-) {
-    if let Ok(val) = pkv.get::<T>(key) {
-        *field = val;
-    } else {
-        let _ = pkv.set(key, field);
-    };
 }
 
 fn setup(
     mut commands: Commands,
-    mut config: ResMut<Config>,
+    config: Res<Config>,
     mut global_volume: ResMut<GlobalVolume>,
     mut fonts: ResMut<Assets<Font>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut star_materials: ResMut<Assets<StarfieldMaterial>>,
+    mut app_font: ResMut<AppFont>,
+    mut palette: ResMut<ColorPalette>,
 ) {
-    let font = Font::try_from_bytes(include_bytes!("../assets/font.ttf").to_vec()).unwrap();
-    let _ = fonts.insert(Handle::<Font>::default().id(), font);
+    *palette = config.build_palette();
+    let font = Font::from_bytes(include_bytes!("../assets/font.ttf").to_vec());
+    app_font.0 = fonts.add(font);
     commands.spawn((
         Camera2d,
         Projection::from(OrthographicProjection {
@@ -456,18 +444,14 @@ fn setup(
         }),
         Transform::from_xyz(0., PLAYER_RADIUS, 0.),
     ));
-    let vol = config.volume;
-    config.set_vol(vol, &mut global_volume);
-    let star = LinearRgba::from(colors::STAR);
-    let bg = LinearRgba::from(colors::BASE);
-    let da = LinearRgba::from(colors::DUST_A);
-    let db = LinearRgba::from(colors::DUST_B);
+    global_volume.volume = bevy::audio::Volume::Linear(config.volume as f32 / 100.);
+    let (color, bg, dust_a, dust_b) = starfield_colors(&palette);
     let mat = star_materials.add(StarfieldMaterial {
         seed: UVec4::new(rand::random::<u32>(), 0, 0, 0),
-        color: Vec4::new(star.red, star.green, star.blue, star.alpha),
-        bg: Vec4::new(bg.red, bg.green, bg.blue, 0.0),
-        dust_a: Vec4::new(da.red, da.green, da.blue, 0.0),
-        dust_b: Vec4::new(db.red, db.green, db.blue, 0.0),
+        color,
+        bg,
+        dust_a,
+        dust_b,
     });
     commands.spawn((
         StarQuad,
@@ -477,13 +461,83 @@ fn setup(
     ));
 }
 
+fn sync_starfield(
+    palette: Res<ColorPalette>,
+    mut star_mats: ResMut<Assets<StarfieldMaterial>>,
+    star: Query<&MeshMaterial2d<StarfieldMaterial>, With<StarQuad>>,
+    mut clear_color: ResMut<ClearColor>,
+) {
+    if !palette.is_changed() {
+        return;
+    }
+    clear_color.0 = palette.background;
+    let Ok(handle) = star.single() else { return };
+    let Some(mut mat) = star_mats.get_mut(&handle.0) else {
+        return;
+    };
+    (mat.color, mat.bg, mat.dust_a, mat.dust_b) = starfield_colors(&palette);
+}
+
+fn starfield_colors(palette: &ColorPalette) -> (Vec4, Vec4, Vec4, Vec4) {
+    let star = LinearRgba::from(palette.star_color());
+    let bg = LinearRgba::from(palette.background);
+    let da = LinearRgba::from(palette.dust_start);
+    let db = LinearRgba::from(palette.dust_end);
+    (
+        Vec4::new(star.red, star.green, star.blue, star.alpha),
+        Vec4::new(bg.red, bg.green, bg.blue, 0.0),
+        Vec4::new(da.red, da.green, da.blue, 0.0),
+        Vec4::new(db.red, db.green, db.blue, 0.0),
+    )
+}
+
+fn handle_font_action(
+    mut fonts: ResMut<Assets<Font>>,
+    mut app_font: ResMut<AppFont>,
+    mut text_fonts: Query<&mut TextFont>,
+) {
+    let Some(bytes) = font_store::take_pending() else {
+        return;
+    };
+    let handle = fonts.add(Font::from_bytes(bytes));
+    app_font.0 = handle.clone();
+    for mut tf in &mut text_fonts {
+        tf.font = FontSource::Handle(handle.clone());
+    }
+}
+
+fn auto_save_settings(config: Res<Config>, drag: Res<VolumeDrag>, mut commands: Commands) {
+    if !config.is_changed() || config.is_added() {
+        return;
+    }
+    if drag.0 {
+        commands.queue(SaveSettingsDeferred::default());
+    } else {
+        commands.queue(SaveSettingsSync::IfChanged);
+    }
+}
+
+fn flush_settings_on_exit(mut exit: MessageReader<AppExit>, mut commands: Commands) {
+    if !exit.is_empty() {
+        exit.clear();
+        commands.queue(SaveSettingsSync::IfChanged);
+    }
+}
+
 fn menu_plugin(app: &mut App) {
+    #[cfg(target_arch = "wasm32")]
+    menu::setup_web_drag_drop();
     app.add_systems(OnExit(Screen::MainMenu), menu::despawn_screen::<MenuScreen>)
         .add_systems(OnEnter(Screen::MainMenu), menu::menu_setup)
-        .add_systems(OnEnter(Screen::Settings), menu::settings_setup)
+        .add_systems(
+            OnEnter(Screen::Settings),
+            (menu::settings_setup, || font_store::set_settings_open(true)),
+        )
         .add_systems(
             OnExit(Screen::Settings),
-            menu::despawn_screen::<SettingsScreen>,
+            (menu::despawn_screen::<SettingsScreen>, || {
+                font_store::set_settings_open(false)
+            }),
         )
         .add_systems(OnEnter(Screen::Help), menu::help_setup)
         .add_systems(OnExit(Screen::Help), menu::despawn_screen::<HelpScreen>)
@@ -492,16 +546,32 @@ fn menu_plugin(app: &mut App) {
             OnExit(Screen::Credits),
             menu::despawn_screen::<CreditsScreen>,
         )
+        .add_systems(OnEnter(Screen::ColorSettings), menu::color_settings_setup)
+        .add_systems(
+            OnExit(Screen::ColorSettings),
+            menu::despawn_screen::<ColorSettingsScreen>,
+        )
         .add_systems(
             Update,
             (
                 menu::mouse,
                 menu::on_selection,
                 menu::on_active,
-                menu::keypress_navigate,
-                menu::keypress_action,
+                menu::grid_navigate,
+                menu::grid_action,
             )
                 .run_if(in_menu),
+        )
+        .add_systems(
+            Update,
+            (
+                menu::sync_swatches,
+                menu::sync_cursor_style,
+                menu::color_click,
+                menu::commit_on_focus_change,
+                menu::color_input_borders,
+            )
+                .run_if(in_state(Screen::ColorSettings)),
         )
         .add_systems(
             Update,
@@ -509,8 +579,18 @@ fn menu_plugin(app: &mut App) {
                 menu::volume_drag_control,
                 menu::volume_start_drag,
                 menu::update_volume_bar,
+                menu::sync_settings_colors,
             )
-                .run_if(in_state(Screen::Settings).or(in_state(GameScreen::Settings))),
+                .run_if(in_state(Screen::Settings).or_else(in_state(GameScreen::Settings))),
+        )
+        .add_systems(
+            Update,
+            menu::update_drop_zone.run_if(in_state(Screen::Settings)),
+        )
+        .add_systems(
+            Update,
+            menu::sync_text_color
+                .run_if(in_state(Screen::Settings).or_else(in_state(Screen::ColorSettings))),
         )
         .insert_resource(VolumeDrag(false))
         .insert_resource(KeyState::default())
@@ -547,7 +627,11 @@ fn update_key_state(
 fn in_menu(state: Res<State<Screen>>, game_state: Res<State<GameScreen>>) -> bool {
     matches!(
         state.get(),
-        Screen::MainMenu | Screen::Credits | Screen::Settings | Screen::Help,
+        Screen::MainMenu
+            | Screen::Credits
+            | Screen::Settings
+            | Screen::Help
+            | Screen::ColorSettings,
     ) || matches!(
         game_state.get(),
         GameScreen::Pause | GameScreen::End | GameScreen::Settings
@@ -612,8 +696,8 @@ fn game_plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                game::camera_follow,
                 game::player_movement,
+                game::camera_follow.after(game::player_movement),
                 game::track_selected_foe.after(game::player_movement),
                 game::keypress,
                 game::slowdown_time,
@@ -632,14 +716,15 @@ fn game_plugin(app: &mut App) {
             )
                 .run_if(in_state(Screen::Game)),
         )
-        .add_systems(Update, game::update_stars)
+        .add_systems(Update, game::update_stars.after(game::camera_follow))
         .add_systems(
             Update,
             menu::resume_countdown.run_if(in_state(GameScreen::ResumeCountdown)),
         )
         .add_systems(
             Update,
-            toggle_pause.run_if(input_just_pressed(KeyCode::Escape).and(in_state(Screen::Game))),
+            toggle_pause
+                .run_if(input_just_pressed(KeyCode::Escape).and_then(in_state(Screen::Game))),
         )
         .add_systems(
             PostUpdate,
@@ -650,7 +735,7 @@ fn game_plugin(app: &mut App) {
                 game::despawner.after(msg::on_msg),
                 game::sync_foe_text
                     .after(msg::on_msg)
-                    .before(update_text2d_layout),
+                    .before(detect_text_needs_rerender),
                 game::lock_foe_text
                     .after(msg::on_msg)
                     .after(update_text2d_layout)
@@ -693,12 +778,20 @@ struct MenuScreen;
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug, Hash, States)]
 enum Screen {
     #[default]
+    Loading,
     MainMenu,
     Game,
     Settings,
     Help,
     Credits,
+    ColorSettings,
 }
+
+#[derive(Component)]
+struct ColorSettingsScreen;
+
+#[derive(Component)]
+pub struct ColorSwatch;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug, Hash, States)]
 enum GameScreen {
@@ -778,7 +871,7 @@ struct Launcher {
     since: f32,
     delay: f32,
     target_offset: Vec2,
-    in_viewport: bool,
+    target_frac: f32,
 }
 
 #[derive(Component)]
@@ -791,6 +884,9 @@ struct CountdownIndicator;
 
 #[derive(Component)]
 struct FoeText;
+
+#[derive(Component)]
+struct FoeTextBg;
 
 #[derive(Component)]
 struct Targeted;
@@ -844,25 +940,37 @@ struct ShapeAssets {
     materials: [Handle<ColorMaterial>; NUM_SHAPES],
 }
 
+#[derive(Component)]
+pub struct DropZone;
+
+#[derive(Resource, Clone)]
+pub struct AppFont(pub Handle<Font>);
+
 #[derive(Resource)]
 pub struct ExplosionAssets {
     pub meshes: [Handle<Mesh>; 5],
 }
 
-pub fn text_font() -> TextFont {
-    TextFont::default().with_font_size(30.)
+pub const SMALL_FONT_SIZE: f32 = 25.;
+
+fn make_font(font: &Handle<Font>, size: f32) -> TextFont {
+    TextFont::from_font_size(FontSize::Px(size)).with_font(font.clone())
 }
 
-pub fn foe_font() -> TextFont {
-    TextFont::default().with_font_size(FOE_FONT_SIZE)
+pub fn text_font(font: &Handle<Font>) -> TextFont {
+    make_font(font, 30.)
 }
 
-pub fn small_font() -> TextFont {
-    TextFont::default().with_font_size(25.)
+pub fn foe_font(font: &Handle<Font>) -> TextFont {
+    make_font(font, FOE_FONT_SIZE)
 }
 
-pub fn title_font() -> TextFont {
-    TextFont::default().with_font_size(80.)
+pub fn small_font(font: &Handle<Font>) -> TextFont {
+    make_font(font, SMALL_FONT_SIZE)
+}
+
+pub fn title_font(font: &Handle<Font>) -> TextFont {
+    make_font(font, 80.)
 }
 
 #[derive(Message)]
@@ -1029,6 +1137,9 @@ pub struct MaxDifToggle;
 pub struct Selected;
 
 #[derive(Component)]
+pub struct Selectable;
+
+#[derive(Component)]
 pub struct Active;
 
 #[derive(Component)]
@@ -1076,13 +1187,13 @@ pub fn movement_mode(keys: &ButtonInput<KeyCode>) -> bool {
         || keys.pressed(KeyCode::Space)
 }
 
-pub fn text_color(i: usize, next: usize) -> TextColor {
+pub fn text_color(palette: &ColorPalette, i: usize, next: usize) -> TextColor {
     TextColor(if next == i {
-        colors::TEXT_NEXT
+        palette.text_next
     } else if next > i {
-        colors::TEXT_DONE
+        palette.text_past
     } else {
-        colors::TEXT_FUTURE
+        palette.text_future
     })
 }
 

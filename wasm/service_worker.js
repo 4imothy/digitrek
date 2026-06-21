@@ -1,4 +1,4 @@
-const CACHE_NAME = 'digitrek-__BUILD_TS__';
+const CACHE_NAME = 'digitrek-__BUILD_HASH__';
 
 const PRECACHE_ASSETS = [
     './',

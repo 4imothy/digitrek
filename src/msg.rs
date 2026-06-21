@@ -9,7 +9,6 @@ pub fn on_toggle_pause(
     mut time: ResMut<Time<Virtual>>,
     mut next_screen: ResMut<NextState<GameScreen>>,
     game_screen: Res<State<GameScreen>>,
-    mut pkv: ResMut<PkvStore>,
     mut config: ResMut<Config>,
     stats: Single<&mut Stats>,
 ) {
@@ -21,7 +20,7 @@ pub fn on_toggle_pause(
                 } else if let GameScreen::Pause = **game_screen {
                     next_screen.set(GameScreen::ResumeCountdown);
                 } else {
-                    stats.save_high_score(&mut config, &mut pkv);
+                    stats.save_high_score(&mut config);
                     time.pause();
                     next_screen.set(GameScreen::Pause);
                 }
@@ -39,16 +38,23 @@ pub fn on_msg(
     player: Single<&Transform, With<Player>>,
     mut config: ResMut<Config>,
     stats: Single<&mut Stats>,
-    mut pkv: ResMut<PkvStore>,
     window: Single<&Window>,
     shape_assets: Res<ShapeAssets>,
     explosion_assets: Res<ExplosionAssets>,
+    app_font: Res<AppFont>,
+    palette: Res<ColorPalette>,
 ) {
     let viewport_width = viewport_width(&window);
     for msg in msg.read() {
         match msg {
             GameMsg::Explosion(position) => {
-                spawn_explosion(&mut commands, &mut materials, &explosion_assets, position);
+                spawn_explosion(
+                    &mut commands,
+                    &mut materials,
+                    &explosion_assets,
+                    &palette,
+                    position,
+                );
             }
             GameMsg::Despawn(entity) => {
                 commands.entity(*entity).insert(ToDespawn);
@@ -89,6 +95,8 @@ pub fn on_msg(
                     &shape_assets,
                     avoid,
                     player_pos,
+                    &app_font.0,
+                    &palette,
                 );
             }
             GameMsg::SpawnObstacle(pos, direction) => {
@@ -98,7 +106,7 @@ pub fn on_msg(
                         colliding: false,
                     },
                     Mesh2d(meshes.add(Circle::new(OBSTACLE_RADIUS))),
-                    MeshMaterial2d(materials.add(colors::OBSTACLE)),
+                    MeshMaterial2d(materials.add(palette.obstacle)),
                     Transform::from_translation(pos.extend(OBSTACLE_Z_INDEX)),
                 ));
             }
@@ -119,13 +127,13 @@ pub fn on_msg(
             GameMsg::Projectile(entity, origin) => {
                 commands.spawn((
                     Mesh2d(meshes.add(Circle::new(PROJECTILE_RADIUS))),
-                    MeshMaterial2d(materials.add(colors::PROJECTILE)),
+                    MeshMaterial2d(materials.add(palette.projectile)),
                     Transform::from_translation(*origin),
                     Projectile { target: *entity },
                 ));
             }
             GameMsg::GameEnd => {
-                stats.save_high_score(&mut config, &mut pkv);
+                stats.save_high_score(&mut config);
                 commands.spawn(Slowdown {
                     time: GAME_OVER_SLOWDOWN_REAL_TIME,
                 });
@@ -138,15 +146,17 @@ fn spawn_explosion(
     commands: &mut Commands,
     materials: &mut ResMut<Assets<ColorMaterial>>,
     explosion_assets: &Res<ExplosionAssets>,
+    palette: &ColorPalette,
     loc: &Vec2,
 ) {
+    let exp = palette.explosion();
     for _ in 0..rand::random_range(15..30) {
         let angle = rand::random_range(0.0..std::f32::consts::TAU);
         let speed = rand::random_range(50.0..150.);
         let velocity = Vec2::new(angle.cos(), angle.sin()) * speed;
 
-        let color = colors::EXPLOSION[0]
-            .mix(&colors::EXPLOSION[1], rand::random_range(0.0..1.))
+        let color = exp[0]
+            .mix(&exp[1], rand::random_range(0.0..1.))
             .with_alpha(EXPLOSION_PARTICLE_INITIAL_ALPHA);
 
         let material = materials.add(color);
@@ -168,26 +178,38 @@ fn spawn_explosion(
     }
 }
 
-fn add_text(cmd: &mut EntityCommands, keys: &[char], num_keys: usize) {
-    let bg = TextBackgroundColor(colors::FOE_WORD_BG);
-    let transparent = TextColor(Color::NONE);
-    let font = foe_font();
+fn add_text(
+    cmd: &mut EntityCommands,
+    keys: &[char],
+    num_keys: usize,
+    font_handle: &Handle<Font>,
+    palette: &ColorPalette,
+) {
+    let font = foe_font(font_handle);
     cmd.with_children(|c| {
         let mut text_cmd = c.spawn((
-            Text2d::new(" "),
+            Text2d::new(keys[0]),
             TextLayout::default(),
             Transform::from_xyz(0., 0., 0.1),
             font.clone(),
-            transparent,
-            bg,
+            text_color(palette, 0, 0),
             FoeText,
             NoFrustumCulling,
         ));
         text_cmd.with_children(|c| {
-            for (i, &ch) in keys[..num_keys].iter().enumerate() {
-                c.spawn((TextSpan::new(ch), text_color(i, 0), font.clone(), bg));
+            for (i, &ch) in keys[1..num_keys].iter().enumerate() {
+                c.spawn((
+                    TextSpan::new(ch),
+                    text_color(palette, i + 1, 0),
+                    font.clone(),
+                ));
             }
-            c.spawn((TextSpan::new(" "), transparent, font.clone(), bg));
+            c.spawn((
+                Sprite::from_color(palette.foe_word_bg(), Vec2::ONE),
+                Transform::from_xyz(0., 0., -0.01),
+                FoeTextBg,
+                NoFrustumCulling,
+            ));
         });
     });
 }
@@ -199,8 +221,9 @@ fn add_foe_launcher(
     arm_length: f32,
     arm_width: f32,
     countdown_sides: usize,
+    palette: &ColorPalette,
 ) {
-    let mat = materials.add(colors::LAUNCHER);
+    let mat = materials.add(palette.launcher);
     ent_cmds.with_children(|cmd| {
         cmd.spawn((
             FoeLauncher { recoil: 0.0 },
@@ -220,7 +243,7 @@ fn add_foe_launcher(
         FOE_SIZE,
         COUNTDOWN_THICKNESS,
     ));
-    let cd_mat = materials.add(colors::OUTLINE_MESH);
+    let cd_mat = materials.add(palette.outline_mesh());
     ent_cmds.with_children(|cmd| {
         cmd.spawn((
             CountdownIndicator,
@@ -295,6 +318,8 @@ fn spawn_foe(
     shape_assets: &ShapeAssets,
     avoid_first: &[char],
     player_pos: Vec2,
+    font: &Handle<Font>,
+    palette: &ColorPalette,
 ) {
     let num_keys = SHAPE_NUM_KEYS[shape.id()];
     let mesh = shape_assets.meshes[shape.id()].clone();
@@ -333,14 +358,16 @@ fn spawn_foe(
                 PENTAGON_LAUNCHER_LENGTH,
                 PENTAGON_LAUNCHER_WIDTH,
                 5,
+                palette,
             );
         }
         Shape::Hexagon => {
+            let target_frac = rand::random_range(HEXAGON_TARGET_MIN..=1.0);
             ent_cmds.insert(Launcher {
                 since: 0.,
                 delay: HEXAGON_LAUNCH_DELAY,
-                target_offset: hexagon_target_offset(pos, player_pos, viewport_width),
-                in_viewport: false,
+                target_offset: hexagon_target_offset(pos, player_pos, viewport_width, target_frac),
+                target_frac,
             });
             add_foe_launcher(
                 &mut ent_cmds,
@@ -349,10 +376,11 @@ fn spawn_foe(
                 HEXAGON_LAUNCHER_LENGTH,
                 HEXAGON_LAUNCHER_WIDTH,
                 6,
+                palette,
             );
         }
     }
-    add_text(&mut ent_cmds, &keys, num_keys);
+    add_text(&mut ent_cmds, &keys, num_keys, font, palette);
     let e = Foe::new(shape, keys, num_keys, spawned_by);
     ent_cmds.insert(e);
 

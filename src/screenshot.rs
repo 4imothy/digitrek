@@ -19,7 +19,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(Startup, start_game)
         .add_systems(
             Update,
-            orchestrate.run_if(in_state(Screen::Game).and(in_state(GameScreen::Running))),
+            orchestrate.run_if(in_state(Screen::Game).and_then(in_state(GameScreen::Running))),
         );
 }
 
