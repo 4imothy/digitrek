@@ -3,11 +3,96 @@
 use crate::*;
 use bevy::{
     ecs::relationship::RelatedSpawnerCommands,
+    input::{ButtonState, keyboard::KeyboardInput},
     input_focus::{FocusCause, InputFocus},
     prelude::*,
     text::{EditableText, EditableTextFilter, LineHeight, TextCursorStyle, TextEdit},
     ui::{RelativeCursorPosition, UiGlobalTransform},
 };
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum RebindKind {
+    Up,
+    Down,
+    Left,
+    Right,
+    Select,
+    Back,
+    Deselect,
+    ThrustLeft,
+    ThrustRight,
+}
+
+impl RebindKind {
+    fn get(self, config: &Config) -> KeyCode {
+        match self {
+            RebindKind::Up => config.up,
+            RebindKind::Down => config.down,
+            RebindKind::Left => config.left,
+            RebindKind::Right => config.right,
+            RebindKind::Select => config.select,
+            RebindKind::Back => config.back,
+            RebindKind::Deselect => config.deselect,
+            RebindKind::ThrustLeft => config.rotate_left,
+            RebindKind::ThrustRight => config.rotate_right,
+        }
+    }
+    fn set(self, config: &mut Config, code: KeyCode) {
+        match self {
+            RebindKind::Up => config.up = code,
+            RebindKind::Down => config.down = code,
+            RebindKind::Left => config.left = code,
+            RebindKind::Right => config.right = code,
+            RebindKind::Select => config.select = code,
+            RebindKind::Back => config.back = code,
+            RebindKind::Deselect => config.deselect = code,
+            RebindKind::ThrustLeft => config.rotate_left = code,
+            RebindKind::ThrustRight => config.rotate_right = code,
+        }
+    }
+    fn name(self) -> &'static str {
+        match self {
+            RebindKind::Up => "up",
+            RebindKind::Down => "down",
+            RebindKind::Left => "left",
+            RebindKind::Right => "right",
+            RebindKind::Select => "select",
+            RebindKind::Back => "back",
+            RebindKind::Deselect => "deselect",
+            RebindKind::ThrustLeft => "left thruster",
+            RebindKind::ThrustRight => "right thruster",
+        }
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct Rebinding {
+    pub kind: Option<RebindKind>,
+    ready: bool,
+}
+
+impl Rebinding {
+    fn arm(&mut self, kind: RebindKind) {
+        self.kind = Some(kind);
+        self.ready = false;
+    }
+}
+
+#[derive(Component)]
+pub struct RebindDisplay(RebindKind);
+
+fn key_name(code: KeyCode) -> String {
+    let raw = format!("{code:?}");
+    let raw = raw.strip_prefix("Key").unwrap_or(&raw);
+    let mut out = String::new();
+    for (i, c) in raw.chars().enumerate() {
+        if c.is_uppercase() && i != 0 {
+            out.push(' ');
+        }
+        out.push(c.to_ascii_lowercase());
+    }
+    out
+}
 
 const VOLUME_LABEL_PREFIX: &str = "volume:";
 
@@ -34,10 +119,17 @@ pub enum Label {
     Settings,
     Credits,
     Volume,
-    PhysicalKeyboardLayout,
-    PhysicalQwerty,
-    PhysicalDvorak,
-    PhysicalColemak,
+    Keybinds,
+    MoveUp,
+    MoveDown,
+    MoveLeft,
+    MoveRight,
+    SelectKey,
+    BackKey,
+    DeselectKey,
+    RotateLeft,
+    RotateRight,
+    RestoreKeybinds,
     MaxDifficulty,
     RestoreFont,
     Colors,
@@ -57,20 +149,9 @@ pub enum Label {
     GameSettings,
     PlayAgain,
     Back,
-    #[cfg(not(target_arch = "wasm32"))]
-    Quit,
 }
 
 impl Label {
-    fn to_layout(self) -> Option<KeyboardLayouts> {
-        match self {
-            Label::PhysicalQwerty => Some(KeyboardLayouts::Qwerty),
-            Label::PhysicalDvorak => Some(KeyboardLayouts::Dvorak),
-            Label::PhysicalColemak => Some(KeyboardLayouts::Colemak),
-            _ => None,
-        }
-    }
-
     fn to_link(self) -> &'static str {
         match self {
             Label::ProgrammingLanguage => credits::PROGRAMMING_LANGUAGE_LINK,
@@ -85,25 +166,6 @@ impl Label {
             Label::GWordList => credits::GWORDLIST_LINK,
             _ => unreachable!(),
         }
-    }
-}
-
-impl KeyboardLayouts {
-    fn nav(&self, right: bool) -> Label {
-        match (self, right) {
-            (KeyboardLayouts::Qwerty, false) => Label::PhysicalColemak,
-            (KeyboardLayouts::Qwerty, true) => Label::PhysicalDvorak,
-            (KeyboardLayouts::Dvorak, false) => Label::PhysicalQwerty,
-            (KeyboardLayouts::Dvorak, true) => Label::PhysicalColemak,
-            (KeyboardLayouts::Colemak, false) => Label::PhysicalDvorak,
-            (KeyboardLayouts::Colemak, true) => Label::PhysicalQwerty,
-        }
-    }
-    fn right(&self) -> Label {
-        self.nav(true)
-    }
-    fn left(&self) -> Label {
-        self.nav(false)
     }
 }
 
@@ -208,8 +270,6 @@ pub fn menu_setup(
                 font.clone(),
                 &palette,
             );
-            #[cfg(not(target_arch = "wasm32"))]
-            spawn_button(cmd, Label::Quit, "quit", false, font.clone(), &palette);
         });
 }
 
@@ -229,40 +289,13 @@ pub fn on_selection(
     }
 }
 
-pub fn on_active(
-    active: Query<Entity, Added<Active>>,
-    mut removed: RemovedComponents<Active>,
-    mut borders: Query<&mut BorderColor>,
-    palette: Res<ColorPalette>,
-) {
-    for entity in removed.read() {
-        if let Ok(mut border) = borders.get_mut(entity) {
-            *border = BorderColor::all(palette.unselected_outline());
-        }
-    }
-    for entity in active {
-        if let Ok(mut border) = borders.get_mut(entity) {
-            *border = BorderColor::all(palette.selected_outline());
-        }
-    }
-}
-
 pub fn mouse(
-    mut commands: Commands,
     mut interaction_query: Query<(&Interaction, &Label), (Changed<Interaction>, With<Button>)>,
     mut hovers: Query<
         (&Interaction, &mut BorderColor),
-        (
-            Changed<Interaction>,
-            With<Button>,
-            Without<Selected>,
-            Without<Active>,
-        ),
+        (Changed<Interaction>, With<Button>, Without<Selected>),
     >,
-    keyboard_options: Query<(Entity, &Label), With<KeyboardOption>>,
-    active: Query<(Entity, &Label), With<Active>>,
     mut max_difficulty_toggle: Query<&mut BackgroundColor, With<MaxDifToggle>>,
-    mut app_exit_msg: MessageWriter<AppExit>,
     mut pause_msg: MessageWriter<PauseMsg>,
     screen: Res<State<Screen>>,
     game_screen: Res<State<GameScreen>>,
@@ -271,24 +304,22 @@ pub fn mouse(
     mut vtime: ResMut<Time<Virtual>>,
     mut config: ResMut<Config>,
     mut palette: ResMut<ColorPalette>,
+    mut rebinding: ResMut<Rebinding>,
 ) {
     for (interaction, menu_button_action) in interaction_query.iter_mut() {
         if *interaction == Interaction::Pressed {
             do_action(
                 *menu_button_action,
-                &mut commands,
-                &mut app_exit_msg,
                 &mut pause_msg,
                 &screen,
                 &game_screen,
                 &mut next_screen,
                 &mut next_game_screen,
-                &active,
-                &keyboard_options,
                 &mut max_difficulty_toggle,
                 &mut vtime,
                 &mut config,
                 &mut palette,
+                &mut rebinding,
             );
         }
     }
@@ -303,26 +334,38 @@ pub fn mouse(
 
 fn do_action(
     action: Label,
-    commands: &mut Commands,
-    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))] app_exit_msg: &mut MessageWriter<
-        AppExit,
-    >,
     pause_msg: &mut MessageWriter<PauseMsg>,
     screen: &State<Screen>,
     game_screen: &State<GameScreen>,
     next_screen: &mut ResMut<NextState<Screen>>,
     next_game_screen: &mut ResMut<NextState<GameScreen>>,
-    active: &Query<(Entity, &Label), With<Active>>,
-    keyboard_options: &Query<(Entity, &Label), With<KeyboardOption>>,
     max_difficulty_toggle: &mut Query<&mut BackgroundColor, With<MaxDifToggle>>,
     vtime: &mut ResMut<Time<Virtual>>,
     config: &mut ResMut<Config>,
     palette: &mut ResMut<ColorPalette>,
+    rebinding: &mut ResMut<Rebinding>,
 ) {
     match action {
-        #[cfg(not(target_arch = "wasm32"))]
-        Label::Quit => {
-            app_exit_msg.write(AppExit::Success);
+        Label::MoveUp => rebinding.arm(RebindKind::Up),
+        Label::MoveDown => rebinding.arm(RebindKind::Down),
+        Label::MoveLeft => rebinding.arm(RebindKind::Left),
+        Label::MoveRight => rebinding.arm(RebindKind::Right),
+        Label::SelectKey => rebinding.arm(RebindKind::Select),
+        Label::BackKey => rebinding.arm(RebindKind::Back),
+        Label::DeselectKey => rebinding.arm(RebindKind::Deselect),
+        Label::RotateLeft => rebinding.arm(RebindKind::ThrustLeft),
+        Label::RotateRight => rebinding.arm(RebindKind::ThrustRight),
+        Label::RestoreKeybinds => {
+            let d = Config::default();
+            config.up = d.up;
+            config.down = d.down;
+            config.left = d.left;
+            config.right = d.right;
+            config.select = d.select;
+            config.back = d.back;
+            config.deselect = d.deselect;
+            config.rotate_left = d.rotate_left;
+            config.rotate_right = d.rotate_right;
         }
         Label::Play => {
             #[cfg(target_arch = "wasm32")]
@@ -333,6 +376,7 @@ fn do_action(
         Label::Help => next_screen.set(Screen::Help),
         Label::Credits => next_screen.set(Screen::Credits),
         Label::Colors => next_screen.set(Screen::ColorSettings),
+        Label::Keybinds => next_screen.set(Screen::Keybinds),
         Label::Back => match (**screen, **game_screen) {
             (Screen::Settings, _) => {
                 next_screen.set(Screen::MainMenu);
@@ -340,7 +384,7 @@ fn do_action(
             (Screen::Credits | Screen::Help, _) => {
                 next_screen.set(Screen::MainMenu);
             }
-            (Screen::ColorSettings, _) => {
+            (Screen::ColorSettings | Screen::Keybinds, _) => {
                 next_screen.set(Screen::Settings);
             }
             (Screen::Game, GameScreen::Settings) => {
@@ -352,16 +396,6 @@ fn do_action(
             }
             _ => {}
         },
-        Label::PhysicalQwerty | Label::PhysicalDvorak | Label::PhysicalColemak => {
-            switch_keyboard_layout(
-                commands,
-                active,
-                keyboard_options,
-                action,
-                Label::PhysicalKeyboardLayout,
-                config,
-            )
-        }
         Label::ProgrammingLanguage
         | Label::GameEngine
         | Label::Palette
@@ -390,7 +424,7 @@ fn do_action(
         }
         Label::MaxDifficulty => {
             config.max_difficulty = !config.max_difficulty;
-            *max_difficulty_toggle.single_mut().ok().unwrap() =
+            *max_difficulty_toggle.single_mut().unwrap() =
                 BackgroundColor(if config.max_difficulty {
                     palette.selected_outline()
                 } else {
@@ -493,28 +527,19 @@ pub fn resume_countdown_setup(
     ));
 }
 
-pub fn help_setup(
-    mut commands: Commands,
-    config: Res<Config>,
-    app_font: Res<AppFont>,
-    palette: Res<ColorPalette>,
-) {
+pub fn help_setup(mut commands: Commands, app_font: Res<AppFont>, palette: Res<ColorPalette>) {
     let font = text_font(&app_font.0);
     commands
         .spawn(screen_with(HelpScreen))
         .with_children(|screen| {
             screen.spawn((
-                Text::new(format!(
+                Text::new(
                     "avoid polygons and circles\n\
-                     type the keys on a polygon to destroy it\n\
-                     press backspace or enter to deselect a polygon\n\
-                     use arrow keys or {up}{left}{down}{right} with space or shift to move\n\
-                     movement uses fuel, typing and time restore it",
-                    up = config.up_char(),
-                    left = config.left_char(),
-                    down = config.down_char(),
-                    right = config.right_char(),
-                )),
+                     type the word on a polygon to destroy it\n\
+                     press the deselect key to target a different polygon\n\
+                     power a thruster to rotate, power both to fly forward\n\
+                     powering a thruster uses fuel, typing and time restore it",
+                ),
                 font.clone(),
                 TextColor(palette.label()),
                 TextLayout {
@@ -552,67 +577,6 @@ pub fn settings_setup(
         .spawn(screen_with(SettingsScreen))
         .with_children(|screen| {
             add_volume(screen, &config, &app_font.0, &palette);
-            screen.spawn((
-                Node {
-                    margin: UiRect::right(Val::Percent(1.)),
-                    ..default()
-                },
-                Text::new("keyboard layout"),
-                font.clone(),
-                TextColor(palette.label()),
-            ));
-
-            let buttons = [
-                (
-                    Label::PhysicalQwerty,
-                    "qwerty",
-                    matches!(config.physical_keyboard_layout, KeyboardLayouts::Qwerty),
-                ),
-                (
-                    Label::PhysicalDvorak,
-                    "dvorak",
-                    matches!(config.physical_keyboard_layout, KeyboardLayouts::Dvorak),
-                ),
-                (
-                    Label::PhysicalColemak,
-                    "colemak",
-                    matches!(config.physical_keyboard_layout, KeyboardLayouts::Colemak),
-                ),
-            ];
-            screen
-                .spawn((
-                    Label::PhysicalKeyboardLayout,
-                    Button,
-                    Node {
-                        flex_direction: FlexDirection::Row,
-                        ..button()
-                    },
-                    BorderColor::all(palette.unselected_outline()),
-                    Selectable,
-                ))
-                .with_children(|row| {
-                    row.spawn((
-                        Text::new("physical:"),
-                        font.clone(),
-                        TextColor(palette.label()),
-                    ));
-                    for (button_label, button_text, active) in buttons {
-                        let font = font.clone();
-                        let mut option = row.spawn((
-                            Button,
-                            button_label,
-                            Node { ..button() },
-                            BorderColor::all(palette.unselected_outline()),
-                            KeyboardOption,
-                        ));
-                        if active {
-                            option.insert(Active);
-                        }
-                        option.with_children(|b| {
-                            b.spawn((Text::new(button_text), font, TextColor(palette.text)));
-                        });
-                    }
-                });
 
             screen
                 .spawn((
@@ -687,6 +651,82 @@ pub fn settings_setup(
                     &palette,
                 );
             });
+            screen.spawn(Node::default()).with_children(|row| {
+                spawn_button(
+                    row,
+                    Label::Keybinds,
+                    "keybinds",
+                    false,
+                    font.clone(),
+                    &palette,
+                );
+                spawn_button(
+                    row,
+                    Label::RestoreKeybinds,
+                    "restore keybinds",
+                    false,
+                    font.clone(),
+                    &palette,
+                );
+            });
+            spawn_button(screen, Label::Back, "back", false, font.clone(), &palette);
+        });
+}
+
+pub fn keybinds_setup(
+    mut commands: Commands,
+    config: Res<Config>,
+    app_font: Res<AppFont>,
+    palette: Res<ColorPalette>,
+) {
+    let font = text_font(&app_font.0);
+    let binds = [
+        (Label::MoveUp, RebindKind::Up),
+        (Label::MoveDown, RebindKind::Down),
+        (Label::MoveLeft, RebindKind::Left),
+        (Label::MoveRight, RebindKind::Right),
+        (Label::SelectKey, RebindKind::Select),
+        (Label::BackKey, RebindKind::Back),
+        (Label::RotateLeft, RebindKind::ThrustLeft),
+        (Label::RotateRight, RebindKind::ThrustRight),
+        (Label::DeselectKey, RebindKind::Deselect),
+    ];
+    commands
+        .spawn(screen_with(KeybindsScreen))
+        .with_children(|screen| {
+            for (i, pair) in binds.chunks(2).enumerate() {
+                screen
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        for (j, (label, kind)) in pair.iter().enumerate() {
+                            let mut e = row.spawn((
+                                *label,
+                                Button,
+                                button(),
+                                BorderColor::all(palette.unselected_outline()),
+                                Selectable,
+                            ));
+                            e.with_children(|button| {
+                                button.spawn((
+                                    Text::new(format!(
+                                        "{}: {}",
+                                        kind.name(),
+                                        key_name(kind.get(&config))
+                                    )),
+                                    font.clone(),
+                                    TextColor(palette.text),
+                                    RebindDisplay(*kind),
+                                ));
+                            });
+                            if i == 0 && j == 0 {
+                                e.insert(Selected);
+                            }
+                        }
+                    });
+            }
             spawn_button(screen, Label::Back, "back", false, font.clone(), &palette);
         });
 }
@@ -939,43 +979,6 @@ impl Config {
     }
 }
 
-fn switch_keyboard_layout(
-    commands: &mut Commands,
-    active: &Query<(Entity, &Label), With<Active>>,
-    keyboard_options: &Query<(Entity, &Label), With<KeyboardOption>>,
-    to: Label,
-    parent_label: Label,
-    config: &mut ResMut<Config>,
-) {
-    let from_ent = active
-        .iter()
-        .find(|(_, label)| {
-            matches!(
-                (parent_label, label),
-                (Label::PhysicalKeyboardLayout, Label::PhysicalQwerty)
-                    | (Label::PhysicalKeyboardLayout, Label::PhysicalDvorak)
-                    | (Label::PhysicalKeyboardLayout, Label::PhysicalColemak)
-            )
-        })
-        .map(|(e, _)| e);
-
-    if parent_label == Label::PhysicalKeyboardLayout {
-        config.physical_keyboard_layout = to.to_layout().unwrap()
-    }
-
-    let to_ent = keyboard_options
-        .iter()
-        .find(|(_, label)| **label == to)
-        .map(|(e, _)| e);
-
-    if let Some(from_ent) = from_ent {
-        commands.entity(from_ent).remove::<Active>();
-    }
-    if let Some(to_ent) = to_ent {
-        commands.entity(to_ent).insert(Active);
-    }
-}
-
 fn nav_pick(
     sel: Entity,
     origin: Vec2,
@@ -1021,58 +1024,34 @@ pub fn grid_navigate(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     mut config: ResMut<Config>,
-    active: Query<(Entity, &Label), With<Active>>,
     mut global_volume: ResMut<GlobalVolume>,
-    keyboard_options: Query<(Entity, &Label), With<KeyboardOption>>,
     input_focus: Res<InputFocus>,
     color_inputs: Query<(), With<ColorChannel>>,
     key: Res<KeyState>,
+    rebinding: Res<Rebinding>,
     selected: Single<(Entity, Option<&Label>), With<Selected>>,
     cells: Query<(Entity, &UiGlobalTransform), With<Selectable>>,
 ) {
-    if input_focus.get().is_some_and(|f| color_inputs.contains(f)) {
+    if rebinding.kind.is_some() || input_focus.get().is_some_and(|f| color_inputs.contains(f)) {
         return;
     }
     let (sel_ent, sel_label) = *selected;
 
-    let right = keys.any_just_pressed([KeyCode::ArrowRight, config.right()])
+    let right = keys.any_just_pressed([KeyCode::ArrowRight, config.right])
         || (key.should_repeat && key.h == Some(true));
-    let left = keys.any_just_pressed([KeyCode::ArrowLeft, config.left()])
+    let left = keys.any_just_pressed([KeyCode::ArrowLeft, config.left])
         || (key.should_repeat && key.h == Some(false));
-    let down = keys.any_just_pressed([KeyCode::ArrowDown, config.down()])
+    let down = keys.any_just_pressed([KeyCode::ArrowDown, config.down])
         || (key.should_repeat && key.v == Some(true));
-    let up = keys.any_just_pressed([KeyCode::ArrowUp, config.up()])
+    let up = keys.any_just_pressed([KeyCode::ArrowUp, config.up])
         || (key.should_repeat && key.v == Some(false));
 
-    let captures_h = matches!(
-        sel_label,
-        Some(Label::Volume) | Some(Label::PhysicalKeyboardLayout)
-    );
+    let captures_h = matches!(sel_label, Some(Label::Volume));
     if captures_h && (left || right) {
-        match sel_label {
-            Some(Label::Volume) => {
-                if right {
-                    config.inc_vol(5, &mut global_volume);
-                } else {
-                    config.dec_vol(5, &mut global_volume);
-                }
-            }
-            Some(Label::PhysicalKeyboardLayout) => {
-                let to = if right {
-                    config.physical_keyboard_layout.right()
-                } else {
-                    config.physical_keyboard_layout.left()
-                };
-                switch_keyboard_layout(
-                    &mut commands,
-                    &active,
-                    &keyboard_options,
-                    to,
-                    Label::PhysicalKeyboardLayout,
-                    &mut config,
-                );
-            }
-            _ => {}
+        if right {
+            config.inc_vol(5, &mut global_volume);
+        } else {
+            config.dec_vol(5, &mut global_volume);
         }
     }
 
@@ -1100,14 +1079,11 @@ pub fn grid_navigate(
 }
 
 pub fn grid_action(
-    mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     mut config: ResMut<Config>,
     mut palette: ResMut<ColorPalette>,
     mut input_focus: ResMut<InputFocus>,
-    active: Query<(Entity, &Label), With<Active>>,
-    keyboard_options: Query<(Entity, &Label), With<KeyboardOption>>,
-    mut app_exit_msg: MessageWriter<AppExit>,
+    mut rebinding: ResMut<Rebinding>,
     mut pause_msg: MessageWriter<PauseMsg>,
     mut max_difficulty_toggle: Query<&mut BackgroundColor, With<MaxDifToggle>>,
     mut vtime: ResMut<Time<Virtual>>,
@@ -1123,15 +1099,18 @@ pub fn grid_action(
         Has<Selected>,
     )>,
 ) {
+    if rebinding.kind.is_some() {
+        return;
+    }
     let enter = keys.just_pressed(KeyCode::Enter);
-    let escape = keys.just_pressed(KeyCode::Escape);
+    let back = keys.just_pressed(config.back) || keys.just_pressed(KeyCode::Escape);
 
     let editing = input_focus
         .get()
         .filter(|&f| cells.get(f).map(|t| t.2.is_some()).unwrap_or(false));
     if let Some(focused) = editing {
-        if enter || escape {
-            if escape
+        if enter || back {
+            if back
                 && let Ok((_, _, Some(&ColorChannel { field, channel }), Some(mut editable), _)) =
                     cells.get_mut(focused)
             {
@@ -1143,9 +1122,9 @@ pub fn grid_action(
         return;
     }
 
-    let action = if escape && **game_screen != GameScreen::Pause {
+    let action = if back && **game_screen != GameScreen::Pause {
         Some(Label::Back)
-    } else if enter || keys.just_pressed(KeyCode::Space) {
+    } else if enter || keys.just_pressed(config.select) {
         let sel = cells.iter().find_map(|(e, _, _, _, s)| s.then_some(e));
         let mut label_action = None;
         if let Some(sel) = sel
@@ -1168,20 +1147,61 @@ pub fn grid_action(
     if let Some(label) = action {
         do_action(
             label,
-            &mut commands,
-            &mut app_exit_msg,
             &mut pause_msg,
             &screen,
             &game_screen,
             &mut next_screen,
             &mut next_game_screen,
-            &active,
-            &keyboard_options,
             &mut max_difficulty_toggle,
             &mut vtime,
             &mut config,
             &mut palette,
+            &mut rebinding,
         );
+    }
+}
+
+pub fn capture_rebind(
+    mut rebinding: ResMut<Rebinding>,
+    mut keyboard: MessageReader<KeyboardInput>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut config: ResMut<Config>,
+) {
+    let Some(kind) = rebinding.kind else {
+        keyboard.clear();
+        return;
+    };
+    if !rebinding.ready {
+        rebinding.ready = true;
+        keyboard.clear();
+        return;
+    }
+    for ev in keyboard.read() {
+        if ev.state != ButtonState::Pressed {
+            continue;
+        }
+        kind.set(&mut config, ev.key_code);
+        keys.reset(ev.key_code);
+        rebinding.kind = None;
+        break;
+    }
+}
+
+pub fn sync_rebind_text(
+    rebinding: Res<Rebinding>,
+    config: Res<Config>,
+    mut displays: Query<(&RebindDisplay, &mut Text)>,
+) {
+    for (display, mut text) in &mut displays {
+        let value = if rebinding.kind == Some(display.0) {
+            "press a key".to_string()
+        } else {
+            key_name(display.0.get(&config))
+        };
+        let s = format!("{}: {value}", display.0.name());
+        if text.0 != s {
+            *text = Text::new(s);
+        }
     }
 }
 
@@ -1219,15 +1239,15 @@ pub fn volume_drag_control(
 pub fn sync_settings_colors(
     palette: Res<ColorPalette>,
     config: Res<Config>,
-    mut borders: Query<(Has<Selected>, Has<Active>, &mut BorderColor), Without<MaxDifToggle>>,
+    mut borders: Query<(Has<Selected>, &mut BorderColor), Without<MaxDifToggle>>,
     mut toggle: Query<(&mut BorderColor, &mut BackgroundColor), With<MaxDifToggle>>,
     mut volume_bar: Query<&mut BackgroundColor, (With<VolumeControlBar>, Without<MaxDifToggle>)>,
 ) {
     if !palette.is_changed() {
         return;
     }
-    for (selected, active, mut border) in &mut borders {
-        *border = BorderColor::all(if selected || active {
+    for (selected, mut border) in &mut borders {
+        *border = BorderColor::all(if selected {
             palette.selected_outline()
         } else {
             palette.unselected_outline()

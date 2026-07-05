@@ -5,11 +5,11 @@ edition = "2024"
 
 [dependencies]
 bevy = { version = "0.19.0", features = ["bevy_settings", "bevy_ui_widgets"] }
-rand = "0.10.1"
+rand = "0.10.2"
 ttf-parser = "0.25.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-open = "5.3.5"
+open = "5.3.6"
 directories = "6.0.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

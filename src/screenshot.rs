@@ -19,7 +19,9 @@ pub fn plugin(app: &mut App) {
         .add_systems(Startup, start_game)
         .add_systems(
             Update,
-            orchestrate.run_if(in_state(Screen::Game).and_then(in_state(GameScreen::Running))),
+            orchestrate
+                .after(crate::game::player_movement)
+                .run_if(in_state(Screen::Game).and_then(in_state(GameScreen::Running))),
         );
 }
 
@@ -59,6 +61,8 @@ fn orchestrate(
         Without<PlayerLauncher>,
     >,
     time: Res<Time<Real>>,
+    config: Res<Config>,
+    mut keyboard: ResMut<ButtonInput<KeyCode>>,
     player: Single<&Transform, (With<Player>, Without<Foe>, Without<PlayerLauncher>)>,
     mut launcher: Single<&mut Transform, With<PlayerLauncher>>,
 ) {
@@ -125,8 +129,6 @@ fn orchestrate(
             Vec2::new(180., -90.),
             Vec2::new(-0.843, 0.539),
         ));
-
-        fuel.0 = 0.65;
     } else if stage == 1 && t >= 0.25 {
         flow.stage = 2;
         let mut pent_ent_pos: Option<(Entity, Vec2)> = None;
@@ -173,12 +175,13 @@ fn orchestrate(
         for (_, mut foe, ..) in foes.iter_mut() {
             foe.entered_viewport = true;
         }
-    } else if stage == 3 {
+    } else if stage == 3 && t >= 0.55 {
         flow.stage = 4;
         if let Some(target) = flow.rho_ent {
-            let dir = (flow.rho_pos - player_pos).normalize_or_zero();
-            let dist = (flow.rho_pos - player_pos).length();
-            let origin = (player_pos + dir * dist * 0.38).extend(0.);
+            let now = player.translation.xy();
+            let dir = (flow.rho_pos - now).normalize_or_zero();
+            let dist = (flow.rho_pos - now).length();
+            let origin = (now + dir * dist * 0.42).extend(0.);
             msg.write(GameMsg::Projectile(target, origin));
         }
     } else if stage == 4 && t >= 0.60 {
@@ -186,6 +189,11 @@ fn orchestrate(
         commands
             .spawn(Screenshot::primary_window())
             .observe(on_captured);
+    }
+
+    if flow.stage >= 1 {
+        fuel.0 = 0.65;
+        keyboard.press(config.rotate_left);
     }
 }
 

@@ -42,7 +42,12 @@ const TIME_MULTIPLIER: f32 = if cfg!(feature = "speedup") { 5. } else { 1. };
 
 const PLAYER_RADIUS: f32 = 50.;
 const PLAYER_HALF_ANGLE: f32 = PI / 6.;
-const PLAYER_ENGINE_WIDTH: f32 = PLAYER_RADIUS / 2.;
+const PLAYER_ENGINE_WIDTH: f32 = PLAYER_RADIUS / 2.5;
+const PLAYER_ENGINE_LENGTH: f32 = PLAYER_ENGINE_WIDTH / 2.;
+const PLAYER_ENGINE_GLOW_RADIUS: f32 = PLAYER_ENGINE_WIDTH * 0.4;
+const PLAYER_ENGINE_OFFSET_X: f32 = PLAYER_RADIUS * 0.3;
+const PLAYER_ENGINE_OFFSET_Y: f32 = PLAYER_RADIUS * 0.5;
+const PLAYER_ENGINE_ANGLE: f32 = PI / 9.;
 const FOE_SIZE: f32 = PLAYER_RADIUS * 1.4;
 const OBSTACLE_RADIUS: f32 = PLAYER_RADIUS / 3.;
 const PROJECTILE_RADIUS: f32 = PLAYER_RADIUS / 10.;
@@ -95,7 +100,7 @@ const HEXAGON_LAUNCH_DELAY: f32 = 9.;
 const HEXAGON_TARGET_MIN: f32 = 0.8;
 const PENTAGON_SPAWN_DELAY: f32 = 6.;
 const SPAWN_DELTA: f32 = 0.3;
-const SPAWN_LOCATION_MULTIPLIER: f32 = 1.2;
+const SPAWN_MARGIN: f32 = FOE_SIZE * 2.0;
 const NUM_SHAPES: usize = 4;
 const FOE_MAX_SIDES: usize = 6;
 const SHAPES: [Shape; NUM_SHAPES] = [
@@ -247,39 +252,30 @@ const SCORE_TEXT_PADDING: f32 = 10.;
 const EXPLOSION_PARTICLE_MAX_LIFETIME: f32 = 1.;
 const EXPLOSION_PARTICLE_INITIAL_ALPHA: f32 = 0.7;
 
+const SELECT_PULSE_LIFETIME: f32 = 0.35;
+const SELECT_PULSE_END_SCALE: f32 = 1.8;
+const SELECT_PULSE_INITIAL_ALPHA: f32 = 0.9;
+
 const GAME_OVER_SLOWDOWN_REAL_TIME: f32 = 3.;
 const TIME_BEFORE_RESUME: f32 = 3.;
 
 const PRESS_REPEAT_DELAY: f32 = 0.4;
 const PRESS_REPEAT_INTERVAL: f32 = 0.1;
 
-const QWERTY_MOVEMENT: [(KeyCode, char); 4] = [
-    (KeyCode::KeyD, 'd'),
-    (KeyCode::KeyA, 'a'),
-    (KeyCode::KeyW, 'w'),
-    (KeyCode::KeyS, 's'),
-];
-
-const DVORAK_MOVEMENT: [(KeyCode, char); 4] = [
-    (KeyCode::KeyE, 'e'),
-    (KeyCode::KeyA, 'a'),
-    (KeyCode::Comma, ','),
-    (KeyCode::KeyO, 'o'),
-];
-
-const COLEMAK_MOVEMENT: [(KeyCode, char); 4] = [
-    (KeyCode::KeyS, 's'),
-    (KeyCode::KeyA, 'a'),
-    (KeyCode::KeyW, 'w'),
-    (KeyCode::KeyR, 'r'),
-];
-
 #[derive(Resource, SettingsGroup, Reflect)]
 #[reflect(Resource, SettingsGroup, Default)]
 struct Config {
     high_score: usize,
     volume: u8,
-    physical_keyboard_layout: KeyboardLayouts,
+    up: KeyCode,
+    down: KeyCode,
+    left: KeyCode,
+    right: KeyCode,
+    select: KeyCode,
+    back: KeyCode,
+    deselect: KeyCode,
+    rotate_left: KeyCode,
+    rotate_right: KeyCode,
     max_difficulty: bool,
     colors: Vec<(ColorField, [u8; 3])>,
 }
@@ -289,7 +285,15 @@ impl Default for Config {
         Config {
             high_score: 0,
             volume: 100,
-            physical_keyboard_layout: KeyboardLayouts::Qwerty,
+            up: KeyCode::KeyW,
+            down: KeyCode::KeyS,
+            left: KeyCode::KeyA,
+            right: KeyCode::KeyD,
+            select: KeyCode::Space,
+            back: KeyCode::Escape,
+            deselect: KeyCode::Backspace,
+            rotate_left: KeyCode::ShiftLeft,
+            rotate_right: KeyCode::ShiftRight,
             max_difficulty: false,
             colors: Vec::new(),
         }
@@ -322,50 +326,9 @@ impl Config {
         self.colors.clear();
     }
 
-    fn layout_key(&self, idx: usize) -> (KeyCode, char) {
-        let m = match self.physical_keyboard_layout {
-            KeyboardLayouts::Qwerty => QWERTY_MOVEMENT,
-            KeyboardLayouts::Dvorak => DVORAK_MOVEMENT,
-            KeyboardLayouts::Colemak => COLEMAK_MOVEMENT,
-        };
-        m[idx]
+    pub fn engine_firing(&self, keys: &ButtonInput<KeyCode>) -> bool {
+        keys.pressed(self.rotate_left) || keys.pressed(self.rotate_right)
     }
-    pub fn right(&self) -> KeyCode {
-        self.layout_key(0).0
-    }
-    pub fn right_char(&self) -> char {
-        self.layout_key(0).1
-    }
-    pub fn left(&self) -> KeyCode {
-        self.layout_key(1).0
-    }
-    pub fn left_char(&self) -> char {
-        self.layout_key(1).1
-    }
-    pub fn up(&self) -> KeyCode {
-        self.layout_key(2).0
-    }
-    pub fn up_char(&self) -> char {
-        self.layout_key(2).1
-    }
-    pub fn down(&self) -> KeyCode {
-        self.layout_key(3).0
-    }
-    pub fn down_char(&self) -> char {
-        self.layout_key(3).1
-    }
-    pub fn is_movement_key(&self, key: KeyCode) -> bool {
-        key == self.up() || key == self.down() || key == self.left() || key == self.right()
-    }
-}
-
-#[derive(Reflect, Default, Clone, Copy, PartialEq)]
-#[reflect(Default)]
-enum KeyboardLayouts {
-    #[default]
-    Qwerty,
-    Dvorak,
-    Colemak,
 }
 
 fn main() {
@@ -551,12 +514,19 @@ fn menu_plugin(app: &mut App) {
             OnExit(Screen::ColorSettings),
             menu::despawn_screen::<ColorSettingsScreen>,
         )
+        .add_systems(OnEnter(Screen::Keybinds), menu::keybinds_setup)
+        .add_systems(
+            OnExit(Screen::Keybinds),
+            (
+                menu::despawn_screen::<KeybindsScreen>,
+                |mut rebinding: ResMut<menu::Rebinding>| rebinding.kind = None,
+            ),
+        )
         .add_systems(
             Update,
             (
                 menu::mouse,
                 menu::on_selection,
-                menu::on_active,
                 menu::grid_navigate,
                 menu::grid_action,
             )
@@ -592,6 +562,17 @@ fn menu_plugin(app: &mut App) {
             menu::sync_text_color
                 .run_if(in_state(Screen::Settings).or_else(in_state(Screen::ColorSettings))),
         )
+        .add_systems(
+            Update,
+            (
+                menu::capture_rebind
+                    .after(menu::grid_action)
+                    .after(menu::mouse),
+                menu::sync_rebind_text,
+            )
+                .run_if(in_state(Screen::Keybinds)),
+        )
+        .insert_resource(menu::Rebinding::default())
         .insert_resource(VolumeDrag(false))
         .insert_resource(KeyState::default())
         .add_systems(Update, update_key_state);
@@ -610,16 +591,16 @@ fn update_key_state(
             game_screen.get(),
             GameScreen::Running | GameScreen::ResumeCountdown
         );
-    let mv = !playing || movement_mode(&keys);
+    let mv = !playing;
     key.update(
-        keys.pressed(KeyCode::ArrowUp) || (mv && keys.pressed(config.up())),
-        keys.pressed(KeyCode::ArrowDown) || (mv && keys.pressed(config.down())),
-        keys.pressed(KeyCode::ArrowLeft) || (mv && keys.pressed(config.left())),
-        keys.pressed(KeyCode::ArrowRight) || (mv && keys.pressed(config.right())),
-        keys.just_pressed(KeyCode::ArrowUp) || (mv && keys.just_pressed(config.up())),
-        keys.just_pressed(KeyCode::ArrowDown) || (mv && keys.just_pressed(config.down())),
-        keys.just_pressed(KeyCode::ArrowLeft) || (mv && keys.just_pressed(config.left())),
-        keys.just_pressed(KeyCode::ArrowRight) || (mv && keys.just_pressed(config.right())),
+        keys.pressed(KeyCode::ArrowUp) || (mv && keys.pressed(config.up)),
+        keys.pressed(KeyCode::ArrowDown) || (mv && keys.pressed(config.down)),
+        keys.pressed(KeyCode::ArrowLeft) || (mv && keys.pressed(config.left)),
+        keys.pressed(KeyCode::ArrowRight) || (mv && keys.pressed(config.right)),
+        keys.just_pressed(KeyCode::ArrowUp) || (mv && keys.just_pressed(config.up)),
+        keys.just_pressed(KeyCode::ArrowDown) || (mv && keys.just_pressed(config.down)),
+        keys.just_pressed(KeyCode::ArrowLeft) || (mv && keys.just_pressed(config.left)),
+        keys.just_pressed(KeyCode::ArrowRight) || (mv && keys.just_pressed(config.right)),
         rtime.delta_secs(),
     );
 }
@@ -631,7 +612,8 @@ fn in_menu(state: Res<State<Screen>>, game_state: Res<State<GameScreen>>) -> boo
             | Screen::Credits
             | Screen::Settings
             | Screen::Help
-            | Screen::ColorSettings,
+            | Screen::ColorSettings
+            | Screen::Keybinds,
     ) || matches!(
         game_state.get(),
         GameScreen::Pause | GameScreen::End | GameScreen::Settings
@@ -710,6 +692,7 @@ fn game_plugin(app: &mut App) {
                 game::summoner,
                 game::obstacle,
                 game::explosion_system,
+                game::select_pulse_system,
                 game::update_countdown_indicators,
                 game::update_launcher_ring,
                 game::fuel_charge,
@@ -785,7 +768,11 @@ enum Screen {
     Help,
     Credits,
     ColorSettings,
+    Keybinds,
 }
+
+#[derive(Component)]
+struct KeybindsScreen;
 
 #[derive(Component)]
 struct ColorSettingsScreen;
@@ -819,6 +806,7 @@ enum GameMsg {
     Invisible(Entity),
     Visible(Entity),
     Select(Entity),
+    SelectPulse(Vec2),
     DeSelect(Entity),
     Projectile(Entity, Vec3),
     GameEnd,
@@ -904,7 +892,9 @@ struct SelectionArrowPivot;
 struct PlayerLauncher;
 
 #[derive(Component)]
-struct EngineGlow;
+struct EngineGlow {
+    left: bool,
+}
 
 #[derive(Component)]
 struct LauncherNotch;
@@ -1038,6 +1028,12 @@ struct ExplosionParticle {
 }
 
 #[derive(Component)]
+struct SelectPulse {
+    lifetime: f32,
+    material: Handle<ColorMaterial>,
+}
+
+#[derive(Component)]
 struct Projectile {
     target: Entity,
 }
@@ -1066,6 +1062,20 @@ struct KeyState {
     h: Option<bool>,
 }
 
+fn axis(prev: Option<bool>, neg: bool, pos: bool, neg_just: bool, pos_just: bool) -> Option<bool> {
+    if pos_just {
+        Some(true)
+    } else if neg_just {
+        Some(false)
+    } else if pos ^ neg {
+        Some(pos)
+    } else if !pos && !neg {
+        None
+    } else {
+        prev
+    }
+}
+
 impl KeyState {
     fn update(
         &mut self,
@@ -1079,25 +1089,8 @@ impl KeyState {
         right_just: bool,
         dt: f32,
     ) {
-        if down_just {
-            self.v = Some(true);
-        } else if up_just {
-            self.v = Some(false);
-        } else if down ^ up {
-            self.v = Some(down);
-        } else if !down && !up {
-            self.v = None;
-        }
-
-        if right_just {
-            self.h = Some(true);
-        } else if left_just {
-            self.h = Some(false);
-        } else if right ^ left {
-            self.h = Some(right);
-        } else if !right && !left {
-            self.h = None;
-        }
+        self.v = axis(self.v, up, down, up_just, down_just);
+        self.h = axis(self.h, left, right, left_just, right_just);
 
         let held = up || down || left || right;
         let just_pressed = up_just || down_just || left_just || right_just;
@@ -1140,12 +1133,6 @@ pub struct Selected;
 pub struct Selectable;
 
 #[derive(Component)]
-pub struct Active;
-
-#[derive(Component)]
-pub struct KeyboardOption;
-
-#[derive(Component)]
 pub struct StarQuad;
 
 #[derive(Asset, TypePath, AsBindGroup, Clone)]
@@ -1179,12 +1166,6 @@ pub struct Fuel(pub f32);
 
 pub fn viewport_width(win: &Window) -> f32 {
     VIEWPORT_HEIGHT * (win.width() / win.height())
-}
-
-pub fn movement_mode(keys: &ButtonInput<KeyCode>) -> bool {
-    keys.pressed(KeyCode::ShiftLeft)
-        || keys.pressed(KeyCode::ShiftRight)
-        || keys.pressed(KeyCode::Space)
 }
 
 pub fn text_color(palette: &ColorPalette, i: usize, next: usize) -> TextColor {

@@ -119,6 +119,22 @@ pub fn on_msg(
             GameMsg::Select(entity) => {
                 commands.entity(*entity).insert(Targeted);
             }
+            GameMsg::SelectPulse(position) => {
+                let material =
+                    materials.add(palette.indicator.with_alpha(SELECT_PULSE_INITIAL_ALPHA));
+                commands.spawn((
+                    SelectPulse {
+                        lifetime: SELECT_PULSE_LIFETIME,
+                        material: material.clone(),
+                    },
+                    Mesh2d(meshes.add(Annulus::new(
+                        INDICATOR_RADIUS - INDICATOR_THICKNESS / 2.,
+                        INDICATOR_RADIUS + INDICATOR_THICKNESS / 2.,
+                    ))),
+                    MeshMaterial2d(material),
+                    Transform::from_translation(position.extend(INDICATOR_Z_INDEX)),
+                ));
+            }
             GameMsg::DeSelect(entity) => {
                 if let Ok(mut e) = commands.get_entity(*entity) {
                     e.remove::<Targeted>();

@@ -80,24 +80,36 @@ pub fn setup(
                 Transform::from_xyz(0., 0., 0.6),
                 Visibility::Hidden,
             ));
-            cmds.spawn((
-                Mesh2d(meshes.add(Rectangle::new(
-                    PLAYER_ENGINE_WIDTH,
-                    PLAYER_ENGINE_WIDTH / 2.,
-                ))),
-                MeshMaterial2d(materials.add(palette.launcher)),
-                Transform::from_xyz(0., PLAYER_RADIUS / 2., -1.),
-            ));
-            cmds.spawn((
-                Mesh2d(meshes.add(CircularSector::new(
-                    0.8 * PLAYER_ENGINE_WIDTH / 2.,
-                    FRAC_PI_2,
-                ))),
-                MeshMaterial2d(materials.add(palette.glow)),
-                Transform::from_xyz(0., PLAYER_RADIUS / 2. + PLAYER_ENGINE_WIDTH / 4., 2.),
-                Visibility::Hidden,
-                EngineGlow,
-            ));
+            let engine_mesh = meshes.add(Rectangle::new(PLAYER_ENGINE_WIDTH, PLAYER_ENGINE_LENGTH));
+            let engine_glow_mesh =
+                meshes.add(CircularSector::new(PLAYER_ENGINE_GLOW_RADIUS, FRAC_PI_2));
+            let engine_mat = materials.add(palette.launcher);
+            let engine_glow_mat = materials.add(palette.glow);
+            for (sign, left) in [(1., true), (-1., false)] {
+                cmds.spawn((
+                    Mesh2d(engine_mesh.clone()),
+                    MeshMaterial2d(engine_mat.clone()),
+                    Transform {
+                        translation: Vec3::new(
+                            sign * PLAYER_ENGINE_OFFSET_X,
+                            PLAYER_ENGINE_OFFSET_Y,
+                            -1.,
+                        ),
+                        rotation: Quat::from_rotation_z(-sign * PLAYER_ENGINE_ANGLE),
+                        ..default()
+                    },
+                    Visibility::Inherited,
+                ))
+                .with_children(|e| {
+                    e.spawn((
+                        Mesh2d(engine_glow_mesh.clone()),
+                        MeshMaterial2d(engine_glow_mat.clone()),
+                        Transform::from_xyz(0., PLAYER_ENGINE_LENGTH / 2., 3.),
+                        Visibility::Hidden,
+                        EngineGlow { left },
+                    ));
+                });
+            }
             cmds.spawn((
                 Transform::from_xyz(0., 0., 0.),
                 Visibility::Hidden,
@@ -369,16 +381,13 @@ pub fn keypress(
     time: ResMut<Time<Virtual>>,
     stats: Single<&mut Stats>,
     mut fuel: ResMut<Fuel>,
-    keys: Res<ButtonInput<KeyCode>>,
     config: Res<Config>,
 ) {
-    let movement_modifier = movement_mode(&keys);
     let (mut player, player_transform) = player.into_inner();
     if !stats.running {
         keyboard_input.clear();
         return;
     }
-    let mut found_selected = false;
     let mut launcher_transform = launcher.into_inner();
 
     for key in keyboard_input.read() {
@@ -388,103 +397,100 @@ pub fn keypress(
         if time.is_paused() {
             continue;
         }
-        match &key.logical_key {
-            Key::Backspace | Key::Enter => {
-                msg.write(GameMsg::Invisible(*indicator));
-                msg.write(GameMsg::Invisible(*arrow_pivot));
-                player.selection_active = false;
-                if let Some(selected) = player.selected {
-                    msg.write(GameMsg::DeSelect(selected));
-                }
-                player.selected = None;
+        if key.key_code == config.rotate_left || key.key_code == config.rotate_right {
+            continue;
+        }
+        if key.key_code == config.deselect || key.key_code == KeyCode::Enter {
+            msg.write(GameMsg::Invisible(*indicator));
+            msg.write(GameMsg::Invisible(*arrow_pivot));
+            player.selection_active = false;
+            if let Some(selected) = player.selected {
+                msg.write(GameMsg::DeSelect(selected));
             }
-            Key::Character(str) => {
-                if movement_modifier && config.is_movement_key(key.key_code) {
-                    continue;
-                }
-                if let Some(key) = str.chars().next().map(|c| c.to_ascii_lowercase()) {
-                    if let Some(selected) = player.selected
-                        && let Ok((selected_entity, mut selected_foe, selected_transform)) =
-                            foe_query.get_mut(selected)
-                    {
-                        found_selected = true;
-                        if key == selected_foe.keys[selected_foe.next_index] {
-                            point_launcher(
-                                player_transform,
-                                &mut launcher_transform,
-                                &selected_transform,
-                            );
-                            fuel.0 = (fuel.0 + FUEL_PER_KEY).min(1.);
-                            selected_foe.next_index += 1;
-                            msg.write(GameMsg::Projectile(
-                                selected_entity,
-                                projectile_spawn_location(player_transform, &launcher_transform),
-                            ));
-                            if selected_foe.keys_to_type() == 0 {
-                                msg.write(GameMsg::Invisible(*indicator));
-                                msg.write(GameMsg::Invisible(*arrow_pivot));
-                                player.selection_active = false;
-                                msg.write(GameMsg::DeSelect(selected));
-                                player.selected = None;
-                            }
-                        } else {
-                            audio.write(AudioMsg::UnmatchedKeypress);
-                        }
-                    }
-                    if !found_selected {
+            player.selected = None;
+            continue;
+        }
+        if let Key::Character(str) = &key.logical_key
+            && let Some(key) = str.chars().next().map(|c| c.to_ascii_lowercase())
+        {
+            let mut found_selected = false;
+            if let Some(selected) = player.selected
+                && let Ok((selected_entity, mut selected_foe, selected_transform)) =
+                    foe_query.get_mut(selected)
+            {
+                found_selected = true;
+                if key == selected_foe.keys[selected_foe.next_index] {
+                    point_launcher(
+                        player_transform,
+                        &mut launcher_transform,
+                        &selected_transform,
+                    );
+                    fuel.0 = (fuel.0 + FUEL_PER_KEY).min(1.);
+                    selected_foe.next_index += 1;
+                    msg.write(GameMsg::Projectile(
+                        selected_entity,
+                        projectile_spawn_location(player_transform, &launcher_transform),
+                    ));
+                    if selected_foe.keys_to_type() == 0 {
+                        msg.write(GameMsg::Invisible(*indicator));
+                        msg.write(GameMsg::Invisible(*arrow_pivot));
+                        player.selection_active = false;
+                        msg.write(GameMsg::DeSelect(selected));
                         player.selected = None;
-                        let mut closest_distance = f32::MAX;
-                        let mut closest_entity = None;
-                        let mut closest_foe = None;
-                        let mut closest_foe_transform = None;
+                    }
+                } else {
+                    audio.write(AudioMsg::UnmatchedKeypress);
+                }
+            }
+            if !found_selected {
+                player.selected = None;
+                let mut closest_distance = f32::MAX;
+                let mut closest_entity = None;
+                let mut closest_foe = None;
+                let mut closest_foe_transform = None;
 
-                        for (entity, foe, foe_transform) in foe_query.iter_mut() {
-                            if foe.next_index < foe.orig_len
-                                && foe.entered_viewport
-                                && key == foe.keys[foe.next_index]
-                            {
-                                let distance = player_transform
-                                    .translation
-                                    .distance(foe_transform.translation);
-                                if distance < closest_distance {
-                                    closest_distance = distance;
-                                    closest_entity = Some(entity);
-                                    closest_foe = Some(foe);
-                                    closest_foe_transform = Some(foe_transform);
-                                }
-                            }
-                        }
-
-                        if let Some(e) = closest_entity {
-                            let mut ce = closest_foe.unwrap();
-                            if ce.keys_to_type() > 1 {
-                                player.selected = closest_entity;
-                                msg.write(GameMsg::Select(e));
-                            }
-                            point_launcher(
-                                player_transform,
-                                &mut launcher_transform,
-                                &closest_foe_transform.unwrap(),
-                            );
-
-                            fuel.0 = (fuel.0 + FUEL_PER_KEY).min(1.);
-                            ce.next_index += 1;
-                            msg.write(GameMsg::Projectile(
-                                e,
-                                projectile_spawn_location(player_transform, &launcher_transform),
-                            ));
-                        } else {
-                            audio.write(AudioMsg::UnmatchedKeypress);
-                        }
-                        if player.selected.is_none() {
-                            msg.write(GameMsg::Invisible(*indicator));
-                            msg.write(GameMsg::Invisible(*arrow_pivot));
-                            player.selection_active = false;
+                for (entity, foe, foe_transform) in foe_query.iter_mut() {
+                    if foe.next_index < foe.orig_len
+                        && foe.entered_viewport
+                        && key == foe.keys[foe.next_index]
+                    {
+                        let distance = player_transform
+                            .translation
+                            .distance(foe_transform.translation);
+                        if distance < closest_distance {
+                            closest_distance = distance;
+                            closest_entity = Some(entity);
+                            closest_foe = Some(foe);
+                            closest_foe_transform = Some(foe_transform);
                         }
                     }
                 }
+
+                if let Some(e) = closest_entity {
+                    let mut ce = closest_foe.unwrap();
+                    let ct = closest_foe_transform.unwrap();
+                    if ce.keys_to_type() > 1 {
+                        player.selected = closest_entity;
+                        msg.write(GameMsg::Select(e));
+                        msg.write(GameMsg::SelectPulse(ct.translation.xy()));
+                    }
+                    point_launcher(player_transform, &mut launcher_transform, &ct);
+
+                    fuel.0 = (fuel.0 + FUEL_PER_KEY).min(1.);
+                    ce.next_index += 1;
+                    msg.write(GameMsg::Projectile(
+                        e,
+                        projectile_spawn_location(player_transform, &launcher_transform),
+                    ));
+                } else {
+                    audio.write(AudioMsg::UnmatchedKeypress);
+                }
+                if player.selected.is_none() {
+                    msg.write(GameMsg::Invisible(*indicator));
+                    msg.write(GameMsg::Invisible(*arrow_pivot));
+                    player.selection_active = false;
+                }
             }
-            _ => {}
         }
     }
 }
@@ -497,38 +503,35 @@ fn projectile_spawn_location(player_trans: &Transform, launcher_trans: &Transfor
 
 pub fn player_movement(
     time: Res<Time<Virtual>>,
-    key: Res<KeyState>,
+    keys: Res<ButtonInput<KeyCode>>,
+    config: Res<Config>,
     mut fuel: ResMut<Fuel>,
     player: Single<(&mut Transform, &mut Player)>,
     stats: Single<&Stats>,
-    mut glow: Single<&mut Visibility, With<EngineGlow>>,
+    mut glows: Query<(&EngineGlow, &mut Visibility), With<EngineGlow>>,
 ) {
     let (mut transform, mut player) = player.into_inner();
     let dt = time.delta_secs();
     let has_fuel = fuel.0 > 0. || INVINCIBLE;
-    let active = stats.running && !time.is_paused();
+    let active = stats.running && !time.is_paused() && has_fuel;
 
-    let thrusting = active && has_fuel && key.v.is_some();
-    let want = if thrusting {
-        Visibility::Visible
-    } else {
-        Visibility::Hidden
-    };
-    if **glow != want {
-        **glow = want;
+    let left = active && keys.pressed(config.rotate_left);
+    let right = active && keys.pressed(config.rotate_right);
+
+    let mut thrust = 0.;
+    let mut spin = 0.;
+    for (on, dir) in [(left, -1.), (right, 1.)] {
+        if on {
+            thrust += 1.;
+            spin += dir;
+        }
     }
 
-    if active {
-        let rotation_factor = key.h.map(|v| if v { -1. } else { 1. }).unwrap_or(0.);
-        let movement_factor = key.v.map(|v| if v { 1. } else { -1. }).unwrap_or(0.);
-
-        transform.rotation *= Quat::from_rotation_z(rotation_factor * PLAYER_ROTATION_SPEED * dt);
-
-        if has_fuel && movement_factor != 0. {
-            let thrust_dir = (transform.rotation * Vec3::Y).xy();
-            player.velocity += thrust_dir * movement_factor * PLAYER_THRUST * dt;
-            fuel.0 = (fuel.0 - FUEL_DRAIN_RATE * dt).max(0.);
-        }
+    if thrust > 0. {
+        let forward = (transform.rotation * Vec3::NEG_Y).xy();
+        player.velocity += forward * PLAYER_THRUST / 2. * thrust * dt;
+        transform.rotation *= Quat::from_rotation_z(spin * PLAYER_ROTATION_SPEED * dt);
+        fuel.0 = (fuel.0 - FUEL_DRAIN_RATE / 2. * thrust * dt).max(0.);
     }
 
     player.velocity *= (1. - PLAYER_DRAG * dt).max(0.);
@@ -536,6 +539,17 @@ pub fn player_movement(
         player.velocity = Vec2::ZERO;
     }
     transform.translation += player.velocity.extend(0.) * dt;
+
+    for (glow, mut vis) in &mut glows {
+        let want = if glow.left && left || !glow.left && right {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want {
+            *vis = want;
+        }
+    }
 }
 
 pub fn summoner(
@@ -1265,6 +1279,27 @@ pub fn explosion_system(
     }
 }
 
+pub fn select_pulse_system(
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut query: Query<(Entity, &mut Transform, &mut SelectPulse)>,
+    time: Res<Time<Virtual>>,
+    mut msg: MessageWriter<GameMsg>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut transform, mut pulse) in &mut query {
+        pulse.lifetime -= dt;
+        let frac = pulse.lifetime.max(0.) / SELECT_PULSE_LIFETIME;
+        if let Some(mut material) = materials.get_mut(&pulse.material) {
+            material.color.set_alpha(frac * SELECT_PULSE_INITIAL_ALPHA);
+        }
+        let scale = 1. + (SELECT_PULSE_END_SCALE - 1.) * (1. - frac);
+        transform.scale = Vec3::splat(scale);
+        if pulse.lifetime <= 0. {
+            msg.write(GameMsg::Despawn(entity));
+        }
+    }
+}
+
 pub fn player_collisions(
     mut enemies: Query<(Entity, &mut Foe, &Transform), Without<Player>>,
     obstacles: Query<&Transform, (With<Obstacle>, Without<Player>)>,
@@ -1337,8 +1372,8 @@ pub fn player_collisions(
 }
 
 fn spawn_location(width: f32, spawner: &mut Spawner) -> Vec2 {
-    let w = SPAWN_LOCATION_MULTIPLIER * width / 2.;
-    let h = SPAWN_LOCATION_MULTIPLIER * VIEWPORT_HEIGHT / 2.;
+    let w = width / 2. + SPAWN_MARGIN;
+    let h = VIEWPORT_HEIGHT / 2. + SPAWN_MARGIN;
 
     let side = spawner.next_side;
     spawner.next_side = (side + 1) % 4;
@@ -1798,14 +1833,15 @@ pub fn lock_foe_text(
 
 pub fn fuel_charge(
     mut fuel: ResMut<Fuel>,
-    key: Res<KeyState>,
+    keys: Res<ButtonInput<KeyCode>>,
+    config: Res<Config>,
     stats: Single<&Stats>,
     time: Res<Time<Virtual>>,
 ) {
     if !stats.running || time.is_paused() {
         return;
     }
-    if key.v.is_none() {
+    if !config.engine_firing(&keys) {
         fuel.0 = (fuel.0 + FUEL_PASSIVE_RATE * time.delta_secs()).min(1.);
     }
 }
