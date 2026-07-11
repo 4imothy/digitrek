@@ -25,13 +25,16 @@ pub fn setup(
     mut keyboard_input: ResMut<Messages<KeyboardInput>>,
     app_font: Res<AppFont>,
     palette: Res<ColorPalette>,
+    config: Res<Config>,
+    camera: Single<&Transform, With<Camera2d>>,
 ) {
     keyboard_input.clear();
     vtime.set_relative_speed(TIME_MULTIPLIER);
+    let origin = camera.translation.xy();
     commands
         .spawn((
             Transform {
-                translation: Vec3::new(0., PLAYER_RADIUS / 2., PLAYER_Z_INDEX),
+                translation: origin.extend(PLAYER_Z_INDEX),
                 rotation: Quat::from_rotation_z(PI),
                 ..default()
             },
@@ -187,6 +190,10 @@ pub fn setup(
         Stats {
             score: 0,
             running: true,
+            correct_keys: 0,
+            defeated: 0,
+            prev_high_score: config.high_score,
+            cause: None,
         },
     ));
     commands.insert_resource(Fuel(0.));
@@ -195,6 +202,7 @@ pub fn setup(
         foe_delay: FIRST_FOE_SPAWN_DELAY,
         foe_delay_mu: 0.,
         next_side: 0,
+        lull: 0.,
     });
     commands.insert_resource(AudioAssets {
         unmatched_keypress: audio.add(AudioSource {
@@ -231,13 +239,8 @@ pub fn setup(
     commands.insert_resource(Clock(0.));
 }
 
-pub fn default_state(
-    mut next_screen: ResMut<NextState<GameScreen>>,
-    mut camera: Single<&mut Transform, With<Camera2d>>,
-) {
+pub fn default_state(mut next_screen: ResMut<NextState<GameScreen>>) {
     next_screen.set(GameScreen::default());
-    camera.translation.x = 0.;
-    camera.translation.y = PLAYER_RADIUS;
 }
 
 impl Shape {
@@ -341,7 +344,10 @@ impl Stats {
             self.score += dif;
         }
     }
-    pub fn save_high_score(&self, config: &mut ResMut<Config>) {
+    pub fn count_key(&mut self) {
+        self.correct_keys += 1;
+    }
+    pub fn update_high_score(&self, config: &mut ResMut<Config>) {
         if self.score > config.high_score {
             config.high_score = self.score;
         }
@@ -379,7 +385,7 @@ pub fn keypress(
         (Without<Player>, Without<Indicator>, Without<PlayerLauncher>),
     >,
     time: ResMut<Time<Virtual>>,
-    stats: Single<&mut Stats>,
+    mut stats: Single<&mut Stats>,
     mut fuel: ResMut<Fuel>,
     config: Res<Config>,
 ) {
@@ -400,7 +406,7 @@ pub fn keypress(
         if key.key_code == config.rotate_left || key.key_code == config.rotate_right {
             continue;
         }
-        if key.key_code == config.deselect || key.key_code == KeyCode::Enter {
+        if key.key_code == config.deselect || key.key_code == KeyCode::Space {
             msg.write(GameMsg::Invisible(*indicator));
             msg.write(GameMsg::Invisible(*arrow_pivot));
             player.selection_active = false;
@@ -426,6 +432,7 @@ pub fn keypress(
                         &selected_transform,
                     );
                     fuel.0 = (fuel.0 + FUEL_PER_KEY).min(1.);
+                    stats.count_key();
                     selected_foe.next_index += 1;
                     msg.write(GameMsg::Projectile(
                         selected_entity,
@@ -477,6 +484,7 @@ pub fn keypress(
                     point_launcher(player_transform, &mut launcher_transform, &ct);
 
                     fuel.0 = (fuel.0 + FUEL_PER_KEY).min(1.);
+                    stats.count_key();
                     ce.next_index += 1;
                     msg.write(GameMsg::Projectile(
                         e,
@@ -993,6 +1001,9 @@ pub fn projectile(
                     msg.write(GameMsg::Despawn(target_entity));
 
                     stats.inc_score(targeted_foe.num_points());
+                    if targeted_foe.skipped == 0 {
+                        stats.defeated += 1;
+                    }
                     score_change = true;
                 } else {
                     targeted_foe.cleared += 1;
@@ -1339,6 +1350,7 @@ pub fn player_collisions(
         if let Some((normal, a_to_b)) = collide(points.as_slice(), &player_points, None) {
             if !hit {
                 contact = closest_contact(foe_transform.translation.xy(), contact);
+                stats.cause = Some(e.shape.name());
             }
             hit = true;
             e.add_collision(if a_to_b { -normal } else { normal });
@@ -1355,6 +1367,7 @@ pub fn player_collisions(
         {
             if !hit {
                 contact = closest_contact(o_transform.translation.xy(), contact);
+                stats.cause = Some("obstacle");
             }
             hit = true;
         }
@@ -1388,27 +1401,42 @@ fn spawn_location(width: f32, spawner: &mut Spawner) -> Vec2 {
 
 pub fn spawner(
     time: Res<Time<Fixed>>,
-    clock: Res<Clock>,
+    stats: Single<&Stats>,
     mut msg: MessageWriter<GameMsg>,
     mut spawner: ResMut<Spawner>,
     window: Single<&Window>,
     config: Res<Config>,
     player: Single<&Transform, With<Player>>,
-    foes: Query<&Transform, With<Foe>>,
+    foes: Query<(&Transform, &Foe)>,
 ) {
     spawner.foe_delay -= time.delta_secs();
+    spawner.lull = (spawner.lull - time.delta_secs()).max(0.);
 
     if ONE_FOE && !foes.is_empty() {
         return;
     }
 
-    if spawner.foe_delay <= 0. {
+    let progress = stats.defeated as f32;
+    let player_pos = player.translation.xy();
+    let target = threat_target(progress, config.max_difficulty);
+    let threat: f32 = foes
+        .iter()
+        .map(|(t, f)| {
+            let d = (t.translation.xy().distance(player_pos) / FOE_SIZE).max(1.);
+            f.keys_not_hit() as f32 / d
+        })
+        .sum();
+    if threat >= target {
+        spawner.lull = THREAT_LULL_TIME;
+    }
+    let gated = !MIN_DELAY && (threat >= target || spawner.lull > 0.);
+
+    if spawner.foe_delay <= 0. && !gated {
         let mut rng = rand::rng();
-        let weights = foe_weights(clock.0, config.max_difficulty);
+        let weights = foe_weights(progress, config.max_difficulty);
         spawner.foe_dist = WeightedIndex::new(weights).unwrap();
 
         let width = viewport_width(&window);
-        let player_pos = player.translation.xy();
 
         let shape = SHAPES[spawner.foe_dist.sample(&mut rng)];
 
@@ -1416,12 +1444,12 @@ pub fn spawner(
             .map(|_| spawn_location(width, &mut spawner) + player_pos)
             .find(|candidate| {
                 foes.iter()
-                    .all(|t| t.translation.xy().distance(*candidate) >= FOE_SEPARATION_RADIUS)
+                    .all(|(t, _)| t.translation.xy().distance(*candidate) >= FOE_SEPARATION_RADIUS)
             })
             .unwrap_or_else(|| spawn_location(width, &mut spawner) + player_pos);
 
         msg.write(GameMsg::SpawnFoe(shape, pos, None, None));
-        spawner.foe_delay_mu = spawner_foe_delay_mu(clock.0, config.max_difficulty);
+        spawner.foe_delay_mu = spawner_foe_delay_mu(progress, config.max_difficulty);
 
         spawner.foe_delay = rand::random_range(
             spawner.foe_delay_mu - SPAWN_DELTA..spawner.foe_delay_mu + SPAWN_DELTA,
@@ -1848,11 +1876,19 @@ pub fn fuel_charge(
 
 pub fn update_stars(
     camera: Single<&Transform, (With<Camera2d>, Without<StarQuad>)>,
-    mut quad: Single<&mut Transform, (With<StarQuad>, Without<Camera2d>)>,
+    quad: Single<
+        (&mut Transform, &MeshMaterial2d<StarfieldMaterial>),
+        (With<StarQuad>, Without<Camera2d>),
+    >,
+    mut mats: ResMut<Assets<StarfieldMaterial>>,
     window: Single<&Window>,
 ) {
+    let (mut transform, handle) = quad.into_inner();
     let cam = camera.translation;
     let vw = viewport_width(&window);
-    quad.translation = Vec3::new(cam.x, cam.y, STAR_Z_INDEX);
-    quad.scale = Vec3::new(vw, VIEWPORT_HEIGHT, 1.);
+    transform.translation = Vec3::new(cam.x, cam.y, STAR_Z_INDEX);
+    transform.scale = Vec3::new(vw, VIEWPORT_HEIGHT, 1.);
+    if let Some(mut mat) = mats.get_mut(&handle.0) {
+        mat.view = Vec4::new(cam.x, cam.y, vw, VIEWPORT_HEIGHT);
+    }
 }

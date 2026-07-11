@@ -20,7 +20,7 @@ pub fn on_toggle_pause(
                 } else if let GameScreen::Pause = **game_screen {
                     next_screen.set(GameScreen::ResumeCountdown);
                 } else {
-                    stats.save_high_score(&mut config);
+                    stats.update_high_score(&mut config);
                     time.pause();
                     next_screen.set(GameScreen::Pause);
                 }
@@ -149,7 +149,7 @@ pub fn on_msg(
                 ));
             }
             GameMsg::GameEnd => {
-                stats.save_high_score(&mut config);
+                stats.update_high_score(&mut config);
                 commands.spawn(Slowdown {
                     time: GAME_OVER_SLOWDOWN_REAL_TIME,
                 });

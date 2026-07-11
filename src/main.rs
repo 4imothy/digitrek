@@ -73,6 +73,38 @@ const PLAYER_DRAG: f32 = 5.0;
 const PLAYER_THRUST: f32 = PLAYER_DRAG * PLAYER_MOVEMENT_SPEED;
 const PLAYER_STOP_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 80.;
 const AUDIO_PADDING: f32 = FOE_SIZE * 2.;
+const PROJECTILE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED * 4.;
+const FOE_SEPARATION_RADIUS: f32 = FOE_SIZE * 3.;
+const FOE_SEPARATION_WEIGHT: f32 = 1.5;
+const FOE_SPAWN_RETRY: usize = 5;
+
+const SPAWN_MARGIN: f32 = FOE_SIZE * 2.0;
+const NUM_SHAPES: usize = 4;
+const FOE_MAX_SIDES: usize = 6;
+const SHAPES: [Shape; NUM_SHAPES] = [
+    Shape::Triangle,
+    Shape::Rhombus,
+    Shape::Pentagon,
+    Shape::Hexagon,
+];
+
+const FIRST_FOE_SPAWN_DELAY: f32 = 0.;
+const SPAWN_DELTA: f32 = 0.3;
+const SPAWN_DELAY_DECAY: f32 = 0.09;
+const THREAT_TARGET_BASE: f32 = 4.;
+const THREAT_TARGET_MAX: f32 = 15.;
+const THREAT_TARGET_RAMP: f32 = 0.20;
+const THREAT_LULL_TIME: f32 = 3.;
+const NUM_PHASE: usize = NUM_SHAPES + 1;
+const FOES_PER_PHASE: f32 = 4.;
+const PHASE_WEIGHTS: [[f32; NUM_SHAPES]; NUM_PHASE] = [
+    [0.50, 0.50, 0.00, 0.00],
+    [0.35, 0.50, 0.15, 0.00],
+    [0.20, 0.45, 0.25, 0.10],
+    [0.10, 0.45, 0.30, 0.15],
+    [0.10, 0.40, 0.30, 0.20],
+];
+const SHAPE_NUM_KEYS: [usize; NUM_SHAPES] = [3, 4, 5, 6];
 const SHAPE_MOV_SPEEDS: [f32; NUM_SHAPES] = [
     PLAYER_MOVEMENT_SPEED / 6.,
     PLAYER_MOVEMENT_SPEED / 8.,
@@ -85,41 +117,18 @@ const SHAPE_ROT_SPEEDS: [f32; NUM_SHAPES] = [
     PLAYER_ROTATION_SPEED / 10.,
     PLAYER_ROTATION_SPEED / 12.,
 ];
-const PROJECTILE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED * 4.;
+const HEXAGON_LAUNCH_DELAY: f32 = 8.;
+const HEXAGON_TARGET_MIN: f32 = 0.8;
+const PENTAGON_SPAWN_DELAY: f32 = 7.;
 const OBSTACLE_MOVEMENT_SPEED: f32 = PLAYER_MOVEMENT_SPEED / 3.;
 const OBSTACLE_MIN_SPEED: f32 = OBSTACLE_MOVEMENT_SPEED / 4.;
 const KNOCKBACK_DECAY: f32 = 5.;
 const KNOCKBACK_MULTIPLIER: f32 = 1.5;
 const KNOCKBACK_STOP_SPEED: f32 = 15.;
-const FOE_SEPARATION_RADIUS: f32 = FOE_SIZE * 3.;
-const FOE_SEPARATION_WEIGHT: f32 = 1.5;
-const FOE_SPAWN_RETRY: usize = 5;
+const FUEL_DRAIN_RATE: f32 = 0.45;
+const FUEL_PER_KEY: f32 = 0.01;
+const FUEL_PASSIVE_RATE: f32 = 0.01;
 
-const FIRST_FOE_SPAWN_DELAY: f32 = 0.;
-const HEXAGON_LAUNCH_DELAY: f32 = 9.;
-const HEXAGON_TARGET_MIN: f32 = 0.8;
-const PENTAGON_SPAWN_DELAY: f32 = 6.;
-const SPAWN_DELTA: f32 = 0.3;
-const SPAWN_MARGIN: f32 = FOE_SIZE * 2.0;
-const NUM_SHAPES: usize = 4;
-const FOE_MAX_SIDES: usize = 6;
-const SHAPES: [Shape; NUM_SHAPES] = [
-    Shape::Triangle,
-    Shape::Rhombus,
-    Shape::Pentagon,
-    Shape::Hexagon,
-];
-const NUM_PHASE: usize = NUM_SHAPES + 1;
-const PHASE_TIME: f32 = 7.;
-const PHASE_WEIGHTS: [[f32; NUM_SHAPES]; NUM_PHASE] = [
-    [0.50, 0.50, 0.00, 0.00],
-    [0.35, 0.50, 0.15, 0.00],
-    [0.20, 0.45, 0.25, 0.10],
-    [0.10, 0.45, 0.30, 0.15],
-    [0.10, 0.40, 0.30, 0.20],
-];
-
-const SHAPE_NUM_KEYS: [usize; NUM_SHAPES] = [3, 4, 5, 6];
 const FOE_MAX_NUM_KEYS: usize = *SHAPE_NUM_KEYS.last().unwrap();
 const FOE_FONT_SIZE: f32 = 35.;
 const FOE_AVOID_COUNT: usize = 10;
@@ -137,10 +146,6 @@ const LAUNCHER_ARM_RECOIL_DURATION: f32 = 0.25;
 const LAUNCHER_ARM_RECOIL_MIN_SCALE: f32 = 0.3;
 
 const RING_RESOLUTIONS: u32 = 128;
-
-const FUEL_DRAIN_RATE: f32 = 0.45;
-const FUEL_PER_KEY: f32 = 0.01;
-const FUEL_PASSIVE_RATE: f32 = 0.01;
 
 const STAR_Z_INDEX: f32 = -1.;
 
@@ -221,19 +226,26 @@ pub fn hexagon_target_offset(from: Vec2, player_pos: Vec2, viewport_width: f32, 
     dir * (t_max * frac)
 }
 
-fn spawner_foe_delay_mu(x: f32, max_dif: bool) -> f32 {
+fn spawner_foe_delay_mu(progress: f32, max_dif: bool) -> f32 {
     if MIN_DELAY {
         SPAWN_DELTA
     } else {
-        2. * f32::exp(-0.06 * if max_dif { f32::MAX } else { x }) + 1.
+        2. * f32::exp(-SPAWN_DELAY_DECAY * if max_dif { f32::MAX } else { progress }) + 1.
     }
 }
 
-fn foe_weights(clock: f32, max_dif: bool) -> [f32; NUM_SHAPES] {
+fn threat_target(progress: f32, max_dif: bool) -> f32 {
+    if max_dif {
+        return THREAT_TARGET_MAX;
+    }
+    (THREAT_TARGET_BASE + progress * THREAT_TARGET_RAMP).min(THREAT_TARGET_MAX)
+}
+
+fn foe_weights(progress: f32, max_dif: bool) -> [f32; NUM_SHAPES] {
     if max_dif || MIN_DELAY {
         return *PHASE_WEIGHTS.last().unwrap();
     }
-    let phase: usize = ((clock / PHASE_TIME) as usize).min(PHASE_WEIGHTS.len() - 1);
+    let phase: usize = ((progress / FOES_PER_PHASE) as usize).min(PHASE_WEIGHTS.len() - 1);
     PHASE_WEIGHTS[phase]
 }
 
@@ -415,6 +427,7 @@ fn setup(
         bg,
         dust_a,
         dust_b,
+        view: Vec4::ZERO,
     });
     commands.spawn((
         StarQuad,
@@ -823,6 +836,7 @@ struct Spawner {
     foe_delay: f32,
     foe_delay_mu: f32,
     next_side: usize,
+    lull: f32,
 }
 
 #[derive(Component)]
@@ -841,6 +855,14 @@ enum Shape {
 }
 
 impl Shape {
+    fn name(self) -> &'static str {
+        match self {
+            Shape::Triangle => "triangle",
+            Shape::Rhombus => "rhombus",
+            Shape::Pentagon => "pentagon",
+            Shape::Hexagon => "hexagon",
+        }
+    }
     fn vertex_dirs(self) -> &'static [Vec2] {
         match self {
             Shape::Triangle => &*TRIANGLE_VERTEX_DIRS,
@@ -1042,6 +1064,10 @@ struct Projectile {
 struct Stats {
     score: usize,
     running: bool,
+    correct_keys: usize,
+    defeated: usize,
+    prev_high_score: usize,
+    cause: Option<&'static str>,
 }
 
 #[derive(Component)]
@@ -1136,7 +1162,7 @@ pub struct Selectable;
 pub struct StarQuad;
 
 #[derive(Asset, TypePath, AsBindGroup, Clone)]
-struct StarfieldMaterial {
+pub struct StarfieldMaterial {
     #[uniform(0)]
     seed: UVec4,
     #[uniform(1)]
@@ -1147,6 +1173,8 @@ struct StarfieldMaterial {
     dust_a: Vec4,
     #[uniform(4)]
     dust_b: Vec4,
+    #[uniform(5)]
+    pub view: Vec4,
 }
 
 impl Material2d for StarfieldMaterial {

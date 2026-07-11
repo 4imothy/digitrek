@@ -471,16 +471,43 @@ pub fn pause_setup(mut commands: Commands, app_font: Res<AppFont>, palette: Res<
 
 pub fn end_setup(
     mut commands: Commands,
-    stats: Single<&mut Stats>,
+    stats: Single<&Stats>,
+    clock: Res<Clock>,
+    config: Res<Config>,
     app_font: Res<AppFont>,
     palette: Res<ColorPalette>,
 ) {
     let font = text_font(&app_font.0);
+    let secs = clock.0.max(0.);
+    let wpm = if secs > 0. {
+        stats.correct_keys as f32 * (60. / 5.) / secs
+    } else {
+        0.
+    };
+    let best = if stats.score > stats.prev_high_score {
+        format!("new best: +{}", stats.score - stats.prev_high_score)
+    } else {
+        format!("best: {}", config.high_score)
+    };
+    let taken = stats
+        .cause
+        .map(|c| format!("\ntaken out by: {c}"))
+        .unwrap_or_default();
+    let summary = format!(
+        "game over\nscore: {}   {}\ntime: {}:{:02}   wpm: {:.0}   foes: {}{}",
+        stats.score,
+        best,
+        (secs as usize) / 60,
+        (secs as usize) % 60,
+        wpm,
+        stats.defeated,
+        taken,
+    );
     commands
         .spawn(ingame_screen(EndScreen, &palette))
         .with_children(|cmd| {
             cmd.spawn((
-                Text::new(format!("game over\nscore: {}", stats.score)),
+                Text::new(summary),
                 TextLayout::justify(Justify::Center),
                 font.clone(),
             ));
