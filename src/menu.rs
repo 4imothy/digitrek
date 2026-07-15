@@ -1064,14 +1064,10 @@ pub fn grid_navigate(
     }
     let (sel_ent, sel_label) = *selected;
 
-    let right = keys.any_just_pressed([KeyCode::ArrowRight, config.right])
-        || (key.should_repeat && key.h == Some(true));
-    let left = keys.any_just_pressed([KeyCode::ArrowLeft, config.left])
-        || (key.should_repeat && key.h == Some(false));
-    let down = keys.any_just_pressed([KeyCode::ArrowDown, config.down])
-        || (key.should_repeat && key.v == Some(true));
-    let up = keys.any_just_pressed([KeyCode::ArrowUp, config.up])
-        || (key.should_repeat && key.v == Some(false));
+    let right = config.nav_right(&keys) || (key.should_repeat && key.h == Some(true));
+    let left = config.nav_left(&keys) || (key.should_repeat && key.h == Some(false));
+    let down = config.nav_down(&keys) || (key.should_repeat && key.v == Some(true));
+    let up = config.nav_up(&keys) || (key.should_repeat && key.v == Some(false));
 
     let captures_h = matches!(sel_label, Some(Label::Volume));
     if captures_h && (left || right) {
@@ -1129,14 +1125,13 @@ pub fn grid_action(
     if rebinding.kind.is_some() {
         return;
     }
-    let enter = keys.just_pressed(KeyCode::Enter);
-    let back = keys.just_pressed(config.back) || keys.just_pressed(KeyCode::Escape);
+    let back = config.back_pressed(&keys);
 
     let editing = input_focus
         .get()
         .filter(|&f| cells.get(f).map(|t| t.2.is_some()).unwrap_or(false));
     if let Some(focused) = editing {
-        if enter || back {
+        if config.select_pressed(&keys) || back {
             if back
                 && let Ok((_, _, Some(&ColorChannel { field, channel }), Some(mut editable), _)) =
                     cells.get_mut(focused)
@@ -1151,7 +1146,7 @@ pub fn grid_action(
 
     let action = if back && **game_screen != GameScreen::Pause {
         Some(Label::Back)
-    } else if enter || keys.just_pressed(config.select) {
+    } else if config.select_pressed(&keys) {
         let sel = cells.iter().find_map(|(e, _, _, _, s)| s.then_some(e));
         let mut label_action = None;
         if let Some(sel) = sel

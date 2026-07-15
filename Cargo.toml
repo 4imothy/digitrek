@@ -9,7 +9,7 @@ rand = "0.10.2"
 ttf-parser = "0.25.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-open = "5.3.6"
+open = "5.4.0"
 directories = "6.0.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

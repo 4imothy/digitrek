@@ -87,7 +87,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let local = (in.uv - vec2<f32>(0.5)) * vec2<f32>(view.z, -view.w);
     let cam = view.xy;
 
-    let dpos = cam * 0.04 + local;
+    let dpos = cam * 0.08 + local;
     let n = fbm(dpos / DUST_SCALE);
     let n2 = fbm(dpos / DUST_SCALE * 1.5 + vec2<f32>(7.3, 4.1));
     let dust_color = mix(bg.rgb, mix(dust_a.rgb, dust_b.rgb, n2 * 0.4), smoothstep(0.5, 0.75, n) * 0.06);

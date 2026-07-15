@@ -80,12 +80,12 @@ fn orchestrate(
             msg.write(GameMsg::Despawn(entity));
         }
 
-        let tri1 = Vec2::new(-290., 290.);
-        let rho1 = Vec2::new(270., 310.);
-        let tri2 = Vec2::new(160., -310.);
-        let rho2 = Vec2::new(-310., -390.);
-        let pent = Vec2::new(-460., -130.);
-        let hex = Vec2::new(310., -170.);
+        let tri1 = Vec2::new(-435., 435.);
+        let rho1 = Vec2::new(405., 465.);
+        let tri2 = Vec2::new(240., -465.);
+        let rho2 = Vec2::new(-465., -585.);
+        let pent = Vec2::new(-690., -195.);
+        let hex = Vec2::new(465., -255.);
 
         msg.write(GameMsg::SpawnFoe(
             Shape::Triangle,
@@ -122,11 +122,11 @@ fn orchestrate(
         msg.write(GameMsg::SpawnFoe(Shape::Pentagon, pent, None, None));
         msg.write(GameMsg::SpawnFoe(Shape::Hexagon, hex, None, None));
 
-        msg.write(GameMsg::Explosion(Vec2::new(100., 310.)));
+        msg.write(GameMsg::Explosion(Vec2::new(150., 465.)));
         stats.score = 4;
         stats.show(&mut score_text);
         msg.write(GameMsg::SpawnObstacle(
-            Vec2::new(180., -90.),
+            Vec2::new(270., -135.),
             Vec2::new(-0.843, 0.539),
         ));
     } else if stage == 1 && t >= 0.25 {

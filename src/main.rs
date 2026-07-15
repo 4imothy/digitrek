@@ -16,7 +16,6 @@ pub use palette::{CHANNELS, ColorField, ColorPalette, channel_u8, with_channel};
 
 use bevy::{
     asset::{RenderAssetUsages, embedded_asset},
-    input::common_conditions::input_just_pressed,
     prelude::*,
     render::render_resource::AsBindGroup,
     settings::{
@@ -40,7 +39,7 @@ const ONE_FOE: bool = cfg!(feature = "one_foe");
 const MIN_DELAY: bool = cfg!(feature = "min_delay");
 const TIME_MULTIPLIER: f32 = if cfg!(feature = "speedup") { 5. } else { 1. };
 
-const PLAYER_RADIUS: f32 = 50.;
+const PLAYER_RADIUS: f32 = 70.;
 const PLAYER_HALF_ANGLE: f32 = PI / 6.;
 const PLAYER_ENGINE_WIDTH: f32 = PLAYER_RADIUS / 2.5;
 const PLAYER_ENGINE_LENGTH: f32 = PLAYER_ENGINE_WIDTH / 2.;
@@ -130,7 +129,7 @@ const FUEL_PER_KEY: f32 = 0.01;
 const FUEL_PASSIVE_RATE: f32 = 0.01;
 
 const FOE_MAX_NUM_KEYS: usize = *SHAPE_NUM_KEYS.last().unwrap();
-const FOE_FONT_SIZE: f32 = 35.;
+const FOE_FONT_SIZE: f32 = PLAYER_RADIUS * 0.7;
 const FOE_AVOID_COUNT: usize = 10;
 const WORD_AVOID_RETRIES: usize = 10;
 const PENTAGON_SUMMON_WEIGHTS: [f32; 1] = [1.0];
@@ -257,7 +256,7 @@ const SUMMONER_Z_INDEX: f32 = 3.;
 const HEXAGON_Z_INDEX: f32 = 4.;
 const PLAYER_Z_INDEX: f32 = 6.;
 const INDICATOR_Z_INDEX: f32 = 7.;
-const VIEWPORT_HEIGHT: f32 = 1000.;
+const VIEWPORT_HEIGHT: f32 = 1500.;
 
 const SCORE_TEXT_PADDING: f32 = 10.;
 
@@ -303,7 +302,7 @@ impl Default for Config {
             right: KeyCode::KeyD,
             select: KeyCode::Space,
             back: KeyCode::Escape,
-            deselect: KeyCode::Backspace,
+            deselect: KeyCode::Space,
             rotate_left: KeyCode::ShiftLeft,
             rotate_right: KeyCode::ShiftRight,
             max_difficulty: false,
@@ -339,7 +338,56 @@ impl Config {
     }
 
     pub fn engine_firing(&self, keys: &ButtonInput<KeyCode>) -> bool {
-        keys.pressed(self.rotate_left) || keys.pressed(self.rotate_right)
+        self.left_thruster(keys) || self.right_thruster(keys)
+    }
+
+    pub fn left_thruster(&self, keys: &ButtonInput<KeyCode>) -> bool {
+        keys.any_pressed([self.rotate_left, KeyCode::ArrowLeft])
+    }
+
+    pub fn right_thruster(&self, keys: &ButtonInput<KeyCode>) -> bool {
+        keys.any_pressed([self.rotate_right, KeyCode::ArrowRight])
+    }
+
+    pub fn nav_up(&self, keys: &ButtonInput<KeyCode>) -> bool {
+        keys.any_just_pressed([self.up, KeyCode::ArrowUp])
+    }
+
+    pub fn nav_down(&self, keys: &ButtonInput<KeyCode>) -> bool {
+        keys.any_just_pressed([self.down, KeyCode::ArrowDown])
+    }
+
+    pub fn nav_left(&self, keys: &ButtonInput<KeyCode>) -> bool {
+        keys.any_just_pressed([self.left, KeyCode::ArrowLeft])
+    }
+
+    pub fn nav_right(&self, keys: &ButtonInput<KeyCode>) -> bool {
+        keys.any_just_pressed([self.right, KeyCode::ArrowRight])
+    }
+
+    pub fn nav_states(&self, keys: &ButtonInput<KeyCode>) -> ([bool; 4], [bool; 4]) {
+        let dirs = [
+            (self.up, KeyCode::ArrowUp),
+            (self.down, KeyCode::ArrowDown),
+            (self.left, KeyCode::ArrowLeft),
+            (self.right, KeyCode::ArrowRight),
+        ];
+        (
+            dirs.map(|(c, a)| keys.any_pressed([c, a])),
+            dirs.map(|(c, a)| keys.any_just_pressed([c, a])),
+        )
+    }
+
+    pub fn select_pressed(&self, keys: &ButtonInput<KeyCode>) -> bool {
+        keys.any_just_pressed([self.select, KeyCode::Enter])
+    }
+
+    pub fn back_pressed(&self, keys: &ButtonInput<KeyCode>) -> bool {
+        keys.any_just_pressed([self.back, KeyCode::Escape])
+    }
+
+    pub fn is_deselect(&self, code: KeyCode) -> bool {
+        code == self.deselect || code == KeyCode::Backspace
     }
 }
 
@@ -596,24 +644,17 @@ fn update_key_state(
     config: Res<Config>,
     mut key: ResMut<KeyState>,
     rtime: Res<Time<Real>>,
-    screen: Res<State<Screen>>,
-    game_screen: Res<State<GameScreen>>,
 ) {
-    let playing = matches!(screen.get(), Screen::Game)
-        && matches!(
-            game_screen.get(),
-            GameScreen::Running | GameScreen::ResumeCountdown
-        );
-    let mv = !playing;
+    let (held, just) = config.nav_states(&keys);
     key.update(
-        keys.pressed(KeyCode::ArrowUp) || (mv && keys.pressed(config.up)),
-        keys.pressed(KeyCode::ArrowDown) || (mv && keys.pressed(config.down)),
-        keys.pressed(KeyCode::ArrowLeft) || (mv && keys.pressed(config.left)),
-        keys.pressed(KeyCode::ArrowRight) || (mv && keys.pressed(config.right)),
-        keys.just_pressed(KeyCode::ArrowUp) || (mv && keys.just_pressed(config.up)),
-        keys.just_pressed(KeyCode::ArrowDown) || (mv && keys.just_pressed(config.down)),
-        keys.just_pressed(KeyCode::ArrowLeft) || (mv && keys.just_pressed(config.left)),
-        keys.just_pressed(KeyCode::ArrowRight) || (mv && keys.just_pressed(config.right)),
+        held[0],
+        held[1],
+        held[2],
+        held[3],
+        just[0],
+        just[1],
+        just[2],
+        just[3],
         rtime.delta_secs(),
     );
 }
@@ -631,6 +672,10 @@ fn in_menu(state: Res<State<Screen>>, game_state: Res<State<GameScreen>>) -> boo
         game_state.get(),
         GameScreen::Pause | GameScreen::End | GameScreen::Settings
     )
+}
+
+fn back_just_pressed(keys: Res<ButtonInput<KeyCode>>, config: Res<Config>) -> bool {
+    config.back_pressed(&keys)
 }
 
 fn game_plugin(app: &mut App) {
@@ -719,8 +764,7 @@ fn game_plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            toggle_pause
-                .run_if(input_just_pressed(KeyCode::Escape).and_then(in_state(Screen::Game))),
+            toggle_pause.run_if(back_just_pressed.and_then(in_state(Screen::Game))),
         )
         .add_systems(
             PostUpdate,

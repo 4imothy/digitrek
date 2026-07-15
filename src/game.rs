@@ -406,7 +406,7 @@ pub fn keypress(
         if key.key_code == config.rotate_left || key.key_code == config.rotate_right {
             continue;
         }
-        if key.key_code == config.deselect || key.key_code == KeyCode::Space {
+        if config.is_deselect(key.key_code) {
             msg.write(GameMsg::Invisible(*indicator));
             msg.write(GameMsg::Invisible(*arrow_pivot));
             player.selection_active = false;
@@ -523,8 +523,8 @@ pub fn player_movement(
     let has_fuel = fuel.0 > 0. || INVINCIBLE;
     let active = stats.running && !time.is_paused() && has_fuel;
 
-    let left = active && keys.pressed(config.rotate_left);
-    let right = active && keys.pressed(config.rotate_right);
+    let left = active && config.left_thruster(&keys);
+    let right = active && config.right_thruster(&keys);
 
     let mut thrust = 0.;
     let mut spin = 0.;
@@ -1692,11 +1692,10 @@ pub fn update_launcher_ring(
     mut meshes: ResMut<Assets<Mesh>>,
     ring: Single<(&Mesh2d, &mut Visibility), With<LauncherRing>>,
     stats: Single<&Stats>,
-    time: Res<Time<Virtual>>,
 ) {
     let m = fuel.0;
     let (mesh2d, mut visibility) = ring.into_inner();
-    *visibility = if stats.running && !time.is_paused() && m > 0. {
+    *visibility = if stats.running && m > 0. {
         Visibility::Inherited
     } else {
         Visibility::Hidden
